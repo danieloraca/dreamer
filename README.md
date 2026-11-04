@@ -52,3 +52,4 @@ Start with a small merged-PR sample and evaluate whether lessons improve a later
 review before adding embeddings, a knowledge graph or speculative “dreaming.”
 See [architecture](docs/architecture.md) and the [Pi outline](docs/pi.md).
 # dreamer
+# dreamer

@@ -1,0 +1,15 @@
+[package]
+name = "dreamer"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Evidence-backed knowledge for coding agents"
+
+[dependencies]
+clap = { version = "4.6", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.9"
+
+[profile.release]
+lto = "thin"
+strip = true

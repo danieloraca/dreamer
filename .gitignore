@@ -1,0 +1,14 @@
+/target/
+/data/
+/dreamer.toml
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+.DS_Store

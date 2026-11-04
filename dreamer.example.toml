@@ -1,0 +1,11 @@
+# Copy to dreamer.toml. This file contains no credentials.
+# Relative paths resolve against the directory containing this config file.
+data_dir = "data"
+
+[github]
+# A future read-only source; status does not contact GitHub.
+repository = "geckolabs/Gecko-API"
+batch_size = 25
+
+[memory]
+default_search_limit = 5

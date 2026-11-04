@@ -14,18 +14,27 @@ learn from relevant PR evidence afterwards. No individual lesson approval is nee
 
 Discover Dreamer's available tools. Call `list_repositories` to see configured scopes;
 resolve the actual task repository from the checkout/PR and select it explicitly.
-Never combine another repository's lessons by default. Prefer the Mac `recall_knowledge` tool with a
-few short component or behavior terms and the explicit task repository; otherwise use the Pi `search_lessons` and
-`get_lesson` tools. Search the actual affected repository, then inspect applicability
-and evidence. Literal search can match exclusions; discard those matches. Use
-relevant lessons alongside current source and tests. A miss does not establish
-that no knowledge exists. If the service is unavailable, say so and continue.
+Never combine another repository's lessons by default. Prefer one Mac
+`recall_knowledge` call with a few short task/component terms and the explicit
+repository. It returns five compact previews by default (maximum ten; 12 KB cap).
+Fetch `get_knowledge` only for the useful IDs, usually one to three; inspect full
+applicability and evidence before applying a lesson. Shortened previews can omit
+exclusions. Refine overly broad terms rather than repeatedly loading more records.
+Reuse what you have already read during the task; recall again when scope changes.
+
+With only Pi tools, use `search_lessons` with a small limit (e.g. three), then
+`get_lesson` as needed. Literal matches can include exclusions; discard those
+matches. Use relevant lessons alongside current source and tests. A miss does not
+establish that no knowledge exists. If unavailable, say so and continue.
 
 ## Learn from PRs being read
 
 When the task includes reading a PR in the configured repository, use the Mac tools:
 
-1. `prepare_pr_learning` captures its revision, discussions and patches. Follow
+1. `prepare_pr_learning` checks whether this evidence was successfully learned on
+   this Mac. Stop extraction when `already_processed` is true; `force: true` is for
+   intentional re-evaluation. New heads or changed reviews/discussions reopen it.
+   Otherwise it captures the revision, discussions and patches. Follow
    `next_offset` via `read_pr_evidence` without IDs to browse the catalogue. Use
    `kind` and `path` filters to find relevant implementation/test/follow-up patches.
 2. Read relevant source IDs with `read_pr_evidence`: the original review/discussion,
@@ -33,12 +42,17 @@ When the task includes reading a PR in the configured repository, use the Mac to
    equate a review suggestion, merge or later commit with proof of correctness.
 3. Extract a specific reusable lesson and clear applicability from the resulting
    code. Check existing knowledge before adding an equivalent lesson. If there is
-   no supported new lesson, store nothing. An open unapproved PR supplies task
+   no supported new lesson after inspection, finish with `remember_pr_lessons`,
+   `lessons: []` and a specific `skip_reason`; this saves only a local completion
+   receipt, so repeated requests do not re-extract it. An open unapproved PR supplies task
    context; return after approval or merge to learn from settled feedback.
 4. `remember_pr_lessons` automatically publishes the supported lessons. Provide
    summary, applies_when and inspected evidence IDs. It constructs source metadata,
    deduplicates exact normalized content, checks the current PR and reads back
-   stored records. Retry the same drafts after a disconnected/uncertain write.
+   stored records, then saves a local completion receipt. Retry the same drafts
+   after a disconnected/uncertain write; incomplete writes never mark a PR done.
+   Completion is local to this Mac, not proof of the current Pi contents; use force
+   after restoring the Pi database or intentionally seeking more lessons.
 
 Capture should stay within PRs read for the user's work. Do not crawl unrelated
 repositories. Do not post GitHub comments or modify PRs as part of learning.

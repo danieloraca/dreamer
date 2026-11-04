@@ -100,6 +100,8 @@ pub enum MacCommand {
     Prepare {
         #[arg(long)]
         pr: String,
+        #[arg(long)]
+        force: bool,
     },
     /// Read captured evidence. Without IDs, returns a paginated catalogue.
     Read {
@@ -116,13 +118,28 @@ pub enum MacCommand {
         repository: Option<String>,
         #[arg(long, required = true)]
         query: Vec<String>,
+        #[arg(long, default_value_t = 5)]
+        limit: usize,
+    },
+    /// Fetch the full stored record for one selected lesson.
+    Get {
+        #[arg(long)]
+        repository: Option<String>,
+        #[arg(long)]
+        id: String,
     },
     /// Automatically publish an agent-curated, source-validated batch.
     Remember {
         #[arg(long)]
         revision: String,
-        #[arg(long)]
-        file: PathBuf,
+        #[arg(
+            long,
+            conflicts_with = "skip_reason",
+            required_unless_present = "skip_reason"
+        )]
+        file: Option<PathBuf>,
+        #[arg(long, conflicts_with = "file")]
+        skip_reason: Option<String>,
     },
 }
 
@@ -134,7 +151,7 @@ pub async fn run(path: PathBuf, command: MacCommand) -> std::result::Result<(), 
         }
         let value: Value = match command {
             MacCommand::Repositories => serde_json::json!({"default_repository":settings.repository,"repositories":settings.repositories()}),
-            MacCommand::Prepare { pr } => evidence::prepare(&settings, &GhApi, &pr)?,
+            MacCommand::Prepare { pr, force } => evidence::prepare_with_force(&settings, &GhApi, &pr, force)?,
             MacCommand::Read {
                 revision,
                 id,
@@ -149,10 +166,14 @@ pub async fn run(path: PathBuf, command: MacCommand) -> std::result::Result<(), 
                     path: None,
                 },
             )?,
-            MacCommand::Recall { query, repository } => remote::recall(&settings, repository.as_deref(), query).await?,
-            MacCommand::Remember { revision, file } => {
-                let lessons: Vec<Draft> = serde_json::from_slice(&fs::read(file)?)?;
-                evidence::remember(&settings, &GhApi, RememberInput { revision, lessons }).await?
+            MacCommand::Recall { query, repository, limit } => remote::recall(&settings, repository.as_deref(), query, limit).await?,
+            MacCommand::Get { repository, id } => remote::get(&settings, repository.as_deref(), &id).await?,
+            MacCommand::Remember { revision, file, skip_reason } => {
+                let lessons: Vec<Draft> = match file {
+                    Some(file) => serde_json::from_slice(&fs::read(file)?)?,
+                    None => Vec::new(),
+                };
+                evidence::remember(&settings, &GhApi, RememberInput { revision, lessons, skip_reason }).await?
             }
             MacCommand::Mcp => unreachable!(),
         };

@@ -50,27 +50,56 @@ Ordinary Pi `make deploy` builds exclude the Mac-only client features.
 `list_repositories` discovers configured scopes. `recall_knowledge` accepts an
 explicit `repository` and 1–6 short task/component terms, with the legacy default
 when omitted. It queries the Pi's
-repository-scoped search, deduplicates results and returns at most 20 lessons with
-provenance/evidence. Refine terms when `truncated` is true or recall is too broad.
-Literal matches can include exclusions; Codex assesses actual applicability.
-It can also use the existing Pi `search_lessons`/`get_lesson` tools directly.
+repository-scoped search and deduplicates results. Recall defaults to five compact
+previews (`limit` 1–10) and a 12,000-byte structured JSON cap. Previews include
+summary, applicability, status, evidence count and source PR numbers. Longer text
+is explicitly flagged as shortened; exclusions can be outside the preview.
+`get_knowledge` accepts the same repository and a selected ID, returning full
+applicability, provenance and evidence. Fetch details only for useful matches.
+
+Matches rank by the number of distinct query terms that found each lesson, with
+stable ID ordering for ties. This is lexical overlap, not semantic confidence.
+`truncated` means the reply limit/budget was reached or an upstream 20-per-query
+search may be incomplete; `matched_count` counts only retrieved unique matches.
+Refine broad queries. Existing Pi `search_lessons`/`get_lesson` tools remain
+available, but full records from those tools cost more context; use a small limit.
 
 When reading a relevant PR for the user's task:
 
-1. `prepare_pr_learning` captures the specific PR's current metadata, full diff,
+1. `prepare_pr_learning` first checks a local completion receipt. If code metadata
+   and the complete current reviews/discussions match, it returns a small
+   `already_processed: true` reply without fetching files, commit details or diff.
+   Otherwise it captures the specific PR's current metadata, full diff,
    reviews/comments, final patches and commit-file patches. The existing GitHub
    pagination/count/revision checks still apply. Open PRs can provide context.
-2. `read_pr_evidence` browses a 30-item catalogue with `kind`/`path` filters or reads
+2. `read_pr_evidence` browses a 15-item catalogue with `kind`/`path` filters or reads
    up to eight source IDs (100 KB total). Kinds are `review`, `review_summary`,
    `discussion`, `implementation`, `test` and `commit_patch`. Commit patches include
    original and merge commits; their presence does not establish a follow-up fix.
 3. Codex reads relevant reviews and final code/tests, extracts a specific reusable
    lesson, and supplies summary, applicability and inspected evidence IDs to
-   `remember_pr_lessons`. If there is no new supported lesson, it stores nothing.
+   `remember_pr_lessons`. With no new supported lesson after inspection, pass
+   `lessons: []` and a 15–1000-byte `skip_reason`. This completes the local learning
+   attempt without creating a Pi lesson or connecting to the Pi.
 4. Dreamer checks the sources and current PR, constructs pinned provenance,
    deduplicates exact normalized lesson content, publishes through the write-token
    MCP connection, and checks exact stored readback. A private publication journal
    records outcomes; retry the same drafts after an uncertain/disconnected write.
+   Only a complete successful receipt enables future skipping. Edited feedback
+   at the same head invalidates the skip; matching head SHA alone is insufficient.
+
+Pass `force: true` (CLI `prepare --force`) to intentionally re-evaluate completed
+PRs. Completion records live in the private Mac cache, scoped by repository and PR;
+they are not synchronized across Macs or verified against later Pi restores.
+Use force after restoring/removing Pi knowledge or when seeking additional lessons
+from the same evidence. Older complete publication journals are recognized after
+an exact capture match, then indexed for lightweight checks. Volatile older cache
+identities may require one fresh extraction. Failed/partial receipts never skip.
+
+These changes reduce what reaches Codex's context; the underlying Pi API/database
+is unchanged and needs no deployment. GitHub checks and stored PR evidence remain
+local. New/changed PRs still require model reasoning and source reads. Byte budgets
+are not billed token measurements, and Codex's own review work also uses tokens.
 
 Learning requires a merged PR or an open non-draft PR with a human approval at its
 current head and no outstanding latest human change request. Dismissed/stale/bot
@@ -89,6 +118,7 @@ The same operations are available to a local script for troubleshooting:
 
 ```sh
 ~/.local/share/dreamer/dreamer-mac mac --settings ~/.config/dreamer/mac.toml recall --query export --query checkpoint
+~/.local/share/dreamer/dreamer-mac mac --settings ~/.config/dreamer/mac.toml get --id LESSON_ID
 ~/.local/share/dreamer/dreamer-mac mac --settings ~/.config/dreamer/mac.toml prepare --pr https://github.com/owner/repository/pull/123
 ```
 

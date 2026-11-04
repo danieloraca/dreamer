@@ -3,7 +3,9 @@
 data_dir = "data"
 
 [github]
-# A future read-only source; status does not contact GitHub.
+# Currently the local knowledge repository scope; no GitHub access is performed.
+# This section is retained for config compatibility. Collection will run on Mac;
+# the future Pi service must not require GitHub credentials.
 repository = "geckolabs/Gecko-API"
 batch_size = 25
 

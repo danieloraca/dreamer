@@ -1,3 +1,4 @@
+use crate::lesson::validate_repository;
 use serde::Deserialize;
 use std::{error::Error, fs, path::Path, path::PathBuf};
 
@@ -41,18 +42,7 @@ impl Config {
         if config.data_dir.as_os_str().is_empty() {
             return Err("data_dir must not be empty".into());
         }
-        let parts: Vec<_> = config.github.repository.split('/').collect();
-        let valid_component = |part: &&str| {
-            !part.is_empty()
-                && *part != "."
-                && *part != ".."
-                && part
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
-        };
-        if parts.len() != 2 || !parts.iter().all(valid_component) {
-            return Err("github.repository must use owner/repository syntax".into());
-        }
+        validate_repository(&config.github.repository)?;
         if !(1..=100).contains(&config.github.batch_size) {
             return Err("github.batch_size must be between 1 and 100".into());
         }

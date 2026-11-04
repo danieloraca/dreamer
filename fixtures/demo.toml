@@ -1,0 +1,10 @@
+# Synthetic demo only. Does not refer to Gecko's repository or private data.
+data_dir = "../data/demo"
+
+[github]
+# Kept for compatibility with the initial config; currently a local scope only.
+repository = "example/dreamer-demo"
+batch_size = 25
+
+[memory]
+default_search_limit = 5

@@ -1,6 +1,6 @@
 use dreamer::{
     config::Config,
-    lesson::{Evidence, Lesson, LessonStatus},
+    lesson::{Lesson, LessonStatus},
 };
 use std::process::Command;
 
@@ -44,20 +44,11 @@ fn rejects_missing_storage_path_and_malformed_repositories() {
 
 #[test]
 fn lessons_require_evidence_and_applicability() {
-    let mut lesson = Lesson {
-        id: "example-1".into(),
-        repository: "example/project".into(),
-        summary: "Check access scope before pagination".into(),
-        applies_when: "Reviewing a paginated list endpoint".into(),
-        status: LessonStatus::Candidate,
-        evidence: vec![],
-    };
+    let mut lesson: Lesson =
+        serde_json::from_str(include_str!("../fixtures/sample-lesson.json")).unwrap();
+    let evidence = lesson.evidence.remove(0);
     assert!(lesson.validate().is_err());
-    lesson.evidence.push(Evidence {
-        source_url: "https://example.invalid/pull/1#review-comment".into(),
-        commit_sha: None,
-        description: "Synthetic test fixture; not a real Gecko finding".into(),
-    });
+    lesson.evidence.push(evidence);
     assert!(lesson.validate().is_ok());
     assert_eq!(lesson.status, LessonStatus::Candidate);
     lesson.applies_when.clear();

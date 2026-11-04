@@ -1,4 +1,5 @@
-//! Future read-only GitHub adapter. No HTTP client or authentication is wired yet.
+//! Future Mac-side read-only GitHub adapter. No HTTP client or authentication yet.
+//! The Pi will receive knowledge through a future service/MCP boundary.
 
 use crate::lesson::Evidence;
 

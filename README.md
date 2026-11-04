@@ -4,9 +4,15 @@ A small Rust foundation for a Pi-hosted experience library for coding agents.
 The goal is to learn reusable, evidence-backed lessons from merged pull requests
 and let agents retrieve relevant lessons through MCP.
 
-**This is a skeleton.** Configuration validation, domain types and extension
-interfaces work. GitHub ingestion, model calls, persistence, search, scheduling
-and the MCP protocol are not implemented. No data is collected or sent anywhere.
+**Local knowledge storage works.** SQLite migrations, candidate import, retrieval
+and repository-scoped search are implemented. GitHub ingestion, a Mac collector,
+model refinement, scheduling, deployment and MCP are not implemented. All commands
+are local; none collect private data or make network/model calls.
+
+The intended split is a Pi-hosted library/service and a Mac-side collector that
+uses the Mac's existing private-repository access. The Mac will submit/refine
+knowledge through the future Pi MCP/service boundary; the Pi will not need GitHub
+credentials. The CLI below is a development path, not a remote client.
 
 ## Run
 
@@ -21,7 +27,44 @@ cargo run --locked -- --help
 `status` reads and validates the configuration without writing data or contacting
 GitHub. Relative data paths resolve against the config file's directory.
 The reserved `ingest`, `consolidate` and `mcp` commands print an explicit
-not-implemented error and exit with code 2. Bad configuration exits with code 1.
+not-implemented error and exit with code 2. Operational errors exit with code 1;
+CLI usage errors exit with code 2.
+
+## Try the local fixture
+
+The fixture is invented and uses `example.invalid` links. Its separate config
+keeps demo records out of the Gecko repository scope:
+
+```sh
+cargo run --locked -- --config fixtures/demo.toml db init
+cargo run --locked -- --config fixtures/demo.toml lesson add --file fixtures/sample-lesson.json
+cargo run --locked -- --config fixtures/demo.toml lesson search --query pagination
+cargo run --locked -- --config fixtures/demo.toml lesson get --id pagination-scope-001
+```
+
+This creates `data/demo/knowledge.sqlite3` (ignored by Git). `db init` applies two
+versioned migrations; `lesson add` also initializes/migrates as needed. Identical
+imports return `Unchanged`; a conflicting ID or PR revision fails atomically.
+New imports must be candidates and match the configured repository exactly.
+There is no approval, update, deletion or refinement workflow yet.
+
+Search/get open an existing, current database read-only and return JSON including
+status, evidence, producer/method and a SQLite-assigned UTC storage timestamp.
+Search matches a literal substring of summary/applicability, folds ASCII case,
+excludes deprecated lessons and accepts a limit of 1–100 (config default: 5).
+Results are ordered by storage time descending, then ID ascending. Search is a
+bounded scan within the repository, not semantic search or relevance ranking.
+
+`github.repository` currently supplies local repository scope for compatibility
+with the original config; it grants no GitHub access. See the fixture JSON for
+the complete candidate input format. Producer, URLs and descriptions are claims
+to inspect, not authenticated identity or verified proof.
+
+## Validate
+
+The default build compiles a bundled SQLite, requiring a C compiler as well as
+Rust. No separately installed SQLite is needed. An optional
+`--no-default-features` build links against system SQLite instead.
 
 ```sh
 cargo fmt --check
@@ -40,10 +83,13 @@ src/config.rs          Strict TOML config validation
 src/lesson.rs          Lesson lifecycle, applicability and source evidence
 src/ingest/github.rs   Read-only PR source interface (no adapter)
 src/consolidation.rs   Candidate extraction interface (no model integration)
-src/store.rs           Repository-scoped storage/search interface (no database)
+src/store.rs           Repository-scoped storage/search interface
+src/store/sqlite.rs    Atomic SQLite candidate imports, reads and search
+migrations/           Embedded, append-only SQL migrations and a version ledger
+fixtures/             Synthetic PR lesson and isolated demo configuration
 src/mcp.rs             Planned tool names (no MCP server)
 src/main.rs            Status command and explicit placeholders
-tests/skeleton.rs     Configuration, lesson and CLI behavior
+tests/                Configuration, migrations, persistence and CLI checks
 docs/architecture.md   Boundaries and next steps
 docs/pi.md             Deployment outline
 ```
@@ -51,5 +97,3 @@ docs/pi.md             Deployment outline
 Start with a small merged-PR sample and evaluate whether lessons improve a later
 review before adding embeddings, a knowledge graph or speculative “dreaming.”
 See [architecture](docs/architecture.md) and the [Pi outline](docs/pi.md).
-# dreamer
-# dreamer

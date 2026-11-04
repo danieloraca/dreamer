@@ -1,0 +1,24 @@
+{
+  "id": "pagination-scope-001",
+  "repository": "example/dreamer-demo",
+  "summary": "Apply account access scope before pagination.",
+  "applies_when": "Reviewing a paginated list endpoint that serves multiple accounts.",
+  "status": "candidate",
+  "provenance": {
+    "producer": "dreamer synthetic local fixture",
+    "method": "fixture"
+  },
+  "evidence": [
+    {
+      "source_url": "https://example.invalid/dreamer-demo/pull/42#review-1",
+      "commit_sha": "1111111111111111111111111111111111111111",
+      "description": "Invented example: a reviewer requested account filtering before pagination. This is not a real PR or a verified rule.",
+      "pull_request": {
+        "number": 42,
+        "head_sha": "2222222222222222222222222222222222222222",
+        "url": "https://example.invalid/dreamer-demo/pull/42",
+        "title": "Synthetic example: scope list results before pagination"
+      }
+    }
+  ]
+}

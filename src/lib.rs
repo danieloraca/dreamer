@@ -1,4 +1,5 @@
-//! Dreamer's domain and adapter boundaries. Network and storage adapters are pending.
+//! Dreamer's domain, local SQLite knowledge store and future adapter boundaries.
+//! Network clients, model integration and MCP are not implemented.
 
 pub mod config;
 pub mod consolidation;

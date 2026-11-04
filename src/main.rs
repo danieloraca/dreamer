@@ -1,62 +1,164 @@
 use clap::{Parser, Subcommand};
-use dreamer::{config::Config, mcp::PLANNED_TOOLS};
-use std::{path::PathBuf, process::ExitCode};
+use dreamer::{
+    config::Config,
+    lesson::Lesson,
+    mcp::PLANNED_TOOLS,
+    store::{LessonStore, SearchQuery, WriteOutcome, sqlite::SqliteStore},
+};
+use std::{error::Error, fs, path::PathBuf, process::ExitCode};
 
 #[derive(Parser)]
-#[command(version, about = "Dreamer: evidence-backed agent knowledge (skeleton)")]
+#[command(
+    version,
+    about = "Dreamer: a local evidence-backed knowledge foundation"
+)]
 struct Cli {
+    #[arg(long, global = true, default_value = "dreamer.toml")]
+    config: PathBuf,
     #[command(subcommand)]
     command: Command,
 }
 
 #[derive(Subcommand)]
 enum Command {
-    /// Validate configuration and report implementation status; performs no writes.
-    Status {
-        #[arg(long, default_value = "dreamer.toml")]
-        config: PathBuf,
+    /// Validate configuration and report capabilities; performs no writes.
+    Status,
+    /// Create or migrate the local knowledge database.
+    Db {
+        #[command(subcommand)]
+        command: DbCommand,
     },
-    /// Reserved: read merged pull requests from GitHub (not implemented).
+    /// Add, retrieve and search local lessons. No network or model calls.
+    Lesson {
+        #[command(subcommand)]
+        command: LessonCommand,
+    },
+    /// Reserved: GitHub ingestion (not implemented; future Mac component).
     Ingest,
-    /// Reserved: propose evidence-backed lessons (not implemented).
+    /// Reserved: propose lessons using a model (not implemented).
     Consolidate,
-    /// Reserved: serve lesson tools over MCP (not implemented).
+    /// Reserved: serve knowledge tools over MCP (not implemented).
     Mcp,
 }
 
-fn main() -> ExitCode {
-    match Cli::parse().command {
-        Command::Status { config } => match Config::load(&config) {
-            Ok(config) => {
-                println!("Dreamer {} — skeleton", env!("CARGO_PKG_VERSION"));
-                println!("Configuration: valid");
-                println!("Repository: {}", config.github.repository);
-                println!(
-                    "Data directory (not created): {}",
-                    config.data_dir.display()
-                );
-                println!("GitHub ingestion: not implemented");
-                println!("Consolidation and persistent storage: not implemented");
-                println!(
-                    "MCP: not implemented (planned tools: {})",
-                    PLANNED_TOOLS.join(", ")
-                );
-                ExitCode::SUCCESS
+#[derive(Subcommand)]
+enum DbCommand {
+    /// Initialize SQLite and apply pending versioned migrations.
+    Init,
+}
+
+#[derive(Subcommand)]
+enum LessonCommand {
+    /// Import a candidate JSON file for the configured repository; identical retries are no-ops.
+    Add {
+        #[arg(long)]
+        file: PathBuf,
+    },
+    /// Return a lesson with evidence, provenance and its storage timestamp as JSON.
+    Get {
+        #[arg(long)]
+        id: String,
+    },
+    /// Search summary/applicability by literal substring; excludes deprecated lessons.
+    Search {
+        #[arg(long)]
+        query: String,
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=100))]
+        limit: Option<u32>,
+    },
+}
+
+fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
+    let reserved = match &cli.command {
+        Command::Ingest => Some("ingest"),
+        Command::Consolidate => Some("consolidate"),
+        Command::Mcp => Some("mcp"),
+        _ => None,
+    };
+    if let Some(name) = reserved {
+        eprintln!("{name}: not implemented; no work performed");
+        return Ok(ExitCode::from(2));
+    }
+    let config = Config::load(&cli.config)?;
+    let database = config.data_dir.join("knowledge.sqlite3");
+    match cli.command {
+        Command::Status => {
+            println!(
+                "Dreamer {} — knowledge foundation",
+                env!("CARGO_PKG_VERSION")
+            );
+            println!("Configuration: valid");
+            println!("Repository scope: {}", config.github.repository);
+            println!(
+                "Data directory (not created): {}",
+                config.data_dir.display()
+            );
+            println!("Persistent storage: SQLite (database not opened by status)");
+            println!("GitHub ingestion: not implemented (future Mac component)");
+            println!("Consolidation: not implemented");
+            println!(
+                "MCP: not implemented (planned read tools: {})",
+                PLANNED_TOOLS.join(", ")
+            );
+        }
+        Command::Db {
+            command: DbCommand::Init,
+        } => {
+            fs::create_dir_all(&config.data_dir)?;
+            let store = SqliteStore::open(&database)?;
+            println!(
+                "Database: {} (schema {})",
+                database.display(),
+                store.schema_version()?
+            );
+        }
+        Command::Lesson { command } => match command {
+            LessonCommand::Add { file } => {
+                let lesson: Lesson = serde_json::from_str(&fs::read_to_string(file)?)?;
+                lesson.validate_candidate()?;
+                if lesson.repository != config.github.repository {
+                    return Err(
+                        "lesson repository does not match the configured repository scope".into(),
+                    );
+                }
+                fs::create_dir_all(&config.data_dir)?;
+                let mut store = SqliteStore::open(&database)?;
+                let outcome = match store.put_candidate(&lesson)? {
+                    WriteOutcome::Inserted => "Inserted",
+                    WriteOutcome::Unchanged => "Unchanged",
+                };
+                println!("{outcome} candidate {}/{}", lesson.repository, lesson.id);
             }
-            Err(error) => {
-                eprintln!("Configuration error: {error}");
-                ExitCode::from(1)
+            LessonCommand::Get { id } => {
+                let store = SqliteStore::open_read_only(&database)?;
+                let lesson = store
+                    .get(&config.github.repository, &id)?
+                    .ok_or("lesson not found in this repository")?;
+                println!("{}", serde_json::to_string_pretty(&lesson)?);
+            }
+            LessonCommand::Search { query, limit } => {
+                let store = SqliteStore::open_read_only(&database)?;
+                let lessons = store.search(&SearchQuery {
+                    repository: config.github.repository,
+                    text: query,
+                    limit: limit
+                        .map(|value| value as usize)
+                        .unwrap_or(config.memory.default_search_limit),
+                })?;
+                println!("{}", serde_json::to_string_pretty(&lessons)?);
             }
         },
-        command => {
-            let name = match command {
-                Command::Ingest => "ingest",
-                Command::Consolidate => "consolidate",
-                Command::Mcp => "mcp",
-                Command::Status { .. } => unreachable!(),
-            };
-            eprintln!("{name}: not implemented in this skeleton; no work performed");
-            ExitCode::from(2)
+        Command::Ingest | Command::Consolidate | Command::Mcp => unreachable!(),
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn main() -> ExitCode {
+    match run(Cli::parse()) {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("Dreamer error: {error}");
+            ExitCode::from(1)
         }
     }
 }

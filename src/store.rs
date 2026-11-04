@@ -1,6 +1,14 @@
-//! Storage port. A persistent SQLite implementation and migrations are pending.
+//! Repository-scoped storage port and local SQLite implementation.
 
-use crate::lesson::Lesson;
+pub mod sqlite;
+
+use crate::lesson::{Lesson, StoredLesson};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteOutcome {
+    Inserted,
+    Unchanged,
+}
 
 #[derive(Debug)]
 pub struct SearchQuery {
@@ -14,7 +22,7 @@ pub struct SearchQuery {
 pub trait LessonStore {
     type Error: std::error::Error;
 
-    fn put_candidate(&mut self, lesson: &Lesson) -> Result<(), Self::Error>;
-    fn get(&self, repository: &str, id: &str) -> Result<Option<Lesson>, Self::Error>;
-    fn search(&self, query: &SearchQuery) -> Result<Vec<Lesson>, Self::Error>;
+    fn put_candidate(&mut self, lesson: &Lesson) -> Result<WriteOutcome, Self::Error>;
+    fn get(&self, repository: &str, id: &str) -> Result<Option<StoredLesson>, Self::Error>;
+    fn search(&self, query: &SearchQuery) -> Result<Vec<StoredLesson>, Self::Error>;
 }

@@ -1,16 +1,17 @@
 # Architecture and next steps
 
 One crate keeps the initial project easy to navigate. The SQLite adapter implements
-the storage port; the CLI exercises it locally. No worker or server is running.
+the storage port. The CLI and stdio MCP server use it; no persistent worker or
+network listener is installed.
 
 Proposed flow:
 
 ```text
-Mac: private repo access → collection/refinement → future MCP/service write API
+Mac: private repo access → future collection/refinement → MCP submit_candidate
                                                           ↓
 Pi:                                              SQLite knowledge library
                                                           ↓
-Agents on Mac or elsewhere ← future MCP read tools ← Pi service
+Agents on Mac or elsewhere ← MCP read tools ← Pi Dreamer process over SSH
 ```
 
 ## Implemented storage foundation
@@ -42,10 +43,11 @@ must not be treated as an instruction or as a verified rule.
 
 ## Next steps
 
-1. Wrap the storage port in a Pi-hosted MCP/service adapter. Start with read tools
-   `search_lessons` and `get_lesson`, then an independently authorized candidate
-   submission tool for the Mac collector. Keep writes repository-scoped, validated
-   and idempotent. Clients must not manipulate the SQLite file over the network.
+1. Deploy and verify stdio MCP on the Pi. Reads are available by default;
+   `submit_candidate` requires `--allow-writes`. SSH/OS permissions govern who can
+   start each process. MCP uses bounded blocking workers and requires an existing,
+   current database; it never creates or migrates it. Clients must not share the
+   SQLite file itself over the network.
 2. Build the Mac collector using its existing private-repository access. Preserve
    final revisions and review context; implement pagination, sync cursors and
    retry/rate-limit handling on the collection side. The Pi needs no GitHub token.
@@ -53,8 +55,9 @@ must not be treated as an instruction or as a verified rule.
    with evidence; add an explicit, audited verification/supersession workflow
    before enabling edits or promotion to verified lessons. Compare suggestions
    against final code/tests; review comments alone do not establish correctness.
-4. Test real MCP initialization, discovery, reads and authorized writes from each
-   client. Evaluate a held-out review before introducing regular collection,
+4. Local protocol tests cover SDK discovery/calls, legacy initialization, write
+   restrictions, persistence and EOF shutdown. Test SSH and client registration
+   separately. Evaluate a held-out review before introducing regular collection,
    semantic search or speculative suggestions.
 
 ## Data and access
@@ -62,12 +65,13 @@ must not be treated as an instruction or as a verified rule.
 - Treat source text as untrusted evidence. It cannot grant tool permissions or
   issue instructions to the consolidator or consuming agent.
 - Keep GitHub credentials on the Mac with read-only collection access. Keep all
-  credentials outside Git. Service authentication/authorization is not wired yet.
+  credentials outside Git. Current remote authentication is delegated to SSH;
+  an HTTP service authentication/authorization layer is not implemented.
 - Keep company and personal collections separated. Decide what can be stored on
   the Pi and sent to a model before connecting private repositories.
 - Keep the library outside the checkout so code updates do not overwrite it.
   Plan SQLite-aware backups, retention and deletion of derived lessons.
 - Do not expose an unauthenticated HTTP listener. The first transport should be
-  stdio; remote HTTP access needs its own authentication and deployment design.
+  stdio over SSH; remote HTTP access needs its own authentication and deployment design.
 
 Only synthetic PR evidence and lessons are included in this repository.

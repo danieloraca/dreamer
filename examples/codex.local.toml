@@ -1,0 +1,7 @@
+# Example only. Replace the absolute paths, then add this table to client config.
+# Initialize the database with db init first.
+[mcp_servers.dreamer]
+command = "/absolute/path/to/dreamer/target/release/dreamer"
+args = ["--config", "/absolute/path/to/dreamer/fixtures/demo.toml", "mcp"]
+startup_timeout_sec = 20
+tool_timeout_sec = 30

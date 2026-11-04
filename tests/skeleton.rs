@@ -66,7 +66,7 @@ fn status_reads_example_config_and_reports_pending_adapters() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("Configuration: valid"));
     assert!(stdout.contains("GitHub ingestion: not implemented"));
-    assert!(stdout.contains("MCP: not implemented"));
+    assert!(stdout.contains("MCP: stdio (read-only by default"));
     assert!(stdout.contains(concat!(env!("CARGO_MANIFEST_DIR"), "/data")));
 }
 
@@ -77,7 +77,7 @@ fn missing_config_fails_and_reserved_commands_do_not_claim_success() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    for command in ["ingest", "consolidate", "mcp"] {
+    for command in ["ingest", "consolidate"] {
         let output = Command::new(env!("CARGO_BIN_EXE_dreamer"))
             .arg(command)
             .output()

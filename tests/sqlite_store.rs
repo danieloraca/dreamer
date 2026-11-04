@@ -84,6 +84,26 @@ fn newer_or_gapped_migration_histories_are_rejected_without_changing_data() {
 }
 
 #[test]
+fn existing_writer_never_creates_or_migrates_a_database() {
+    let (_directory, path) = database();
+    assert!(SqliteStore::open_existing(&path).is_err());
+    assert!(!path.exists());
+    drop(SqliteStore::open(&path).unwrap());
+    let connection = Connection::open(&path).unwrap();
+    connection.execute_batch("DROP INDEX lessons_repository_status_time; DROP INDEX evidence_pull_request; DELETE FROM schema_migrations WHERE version = 2;").unwrap();
+    assert!(SqliteStore::open_existing(&path).is_err());
+    let version: i64 = connection
+        .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(version, 1);
+    drop(connection);
+    drop(SqliteStore::open(&path).unwrap());
+    assert!(SqliteStore::open_existing(&path).is_ok());
+}
+
+#[test]
 fn round_trip_survives_reopen_and_preserves_provenance_and_evidence_order() {
     let (_directory, path) = database();
     let mut lesson = fixture();

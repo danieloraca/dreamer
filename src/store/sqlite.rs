@@ -93,6 +93,15 @@ impl SqliteStore {
         Ok(Self { connection })
     }
 
+    /// Writes an existing, current database without creating or migrating it.
+    pub fn open_existing(path: &Path) -> Result<Self, StoreError> {
+        let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        connection.busy_timeout(Duration::from_secs(5))?;
+        connection.pragma_update(None, "foreign_keys", true)?;
+        check_schema(&connection, MIGRATIONS, true)?;
+        Ok(Self { connection })
+    }
+
     pub fn schema_version(&self) -> Result<i64, StoreError> {
         Ok(self
             .connection

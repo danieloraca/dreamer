@@ -8,9 +8,12 @@ description = "Evidence-backed knowledge for coding agents"
 [dependencies]
 clap = { version = "4.6", features = ["derive"] }
 rusqlite = "0.32"
+rmcp = { version = "3.8", default-features = false, features = ["server", "transport-io", "schemars"] }
+schemars = "1.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.9"
+tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "sync"] }
 
 [features]
 default = ["bundled-sqlite"]
@@ -18,6 +21,8 @@ bundled-sqlite = ["rusqlite/bundled"]
 
 [dev-dependencies]
 tempfile = "3.27"
+rmcp = { version = "3.8", default-features = false, features = ["client", "transport-child-process"] }
+tokio = { version = "1.52", features = ["process", "time"] }
 
 [profile.release]
 lto = "thin"

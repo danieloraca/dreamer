@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use dreamer::{
     config::Config,
     lesson::Lesson,
-    mcp::PLANNED_TOOLS,
+    mcp,
     store::{LessonStore, SearchQuery, WriteOutcome, sqlite::SqliteStore},
 };
 use std::{error::Error, fs, path::PathBuf, process::ExitCode};
@@ -37,8 +37,12 @@ enum Command {
     Ingest,
     /// Reserved: propose lessons using a model (not implemented).
     Consolidate,
-    /// Reserved: serve knowledge tools over MCP (not implemented).
-    Mcp,
+    /// Serve MCP over stdio. Requires an existing, current database.
+    Mcp {
+        /// Expose candidate submission in addition to read tools.
+        #[arg(long)]
+        allow_writes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -68,11 +72,10 @@ enum LessonCommand {
     },
 }
 
-fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
+async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
     let reserved = match &cli.command {
         Command::Ingest => Some("ingest"),
         Command::Consolidate => Some("consolidate"),
-        Command::Mcp => Some("mcp"),
         _ => None,
     };
     if let Some(name) = reserved {
@@ -97,8 +100,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
             println!("GitHub ingestion: not implemented (future Mac component)");
             println!("Consolidation: not implemented");
             println!(
-                "MCP: not implemented (planned read tools: {})",
-                PLANNED_TOOLS.join(", ")
+                "MCP: stdio (read-only by default; --allow-writes enables candidate submission)"
             );
         }
         Command::Db {
@@ -148,13 +150,15 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
                 println!("{}", serde_json::to_string_pretty(&lessons)?);
             }
         },
-        Command::Ingest | Command::Consolidate | Command::Mcp => unreachable!(),
+        Command::Mcp { allow_writes } => mcp::serve_stdio(&config, allow_writes).await?,
+        Command::Ingest | Command::Consolidate => unreachable!(),
     }
     Ok(ExitCode::SUCCESS)
 }
 
-fn main() -> ExitCode {
-    match run(Cli::parse()) {
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
+async fn main() -> ExitCode {
+    match run(Cli::parse()).await {
         Ok(code) => code,
         Err(error) => {
             eprintln!("Dreamer error: {error}");

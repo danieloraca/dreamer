@@ -1,0 +1,13 @@
+# Example only. Replace the SSH destination and paths before using.
+# Use an existing verified SSH host and key/agent authentication.
+[mcp_servers.dreamer]
+command = "ssh"
+args = [
+  "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+  "your-user@your-pi",
+  "/home/your-user/Development/dreamer/target/release/dreamer",
+  "--config", "/home/your-user/Development/dreamer/fixtures/demo.toml",
+  "mcp",
+]
+startup_timeout_sec = 20
+tool_timeout_sec = 30

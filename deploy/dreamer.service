@@ -1,0 +1,29 @@
+# Managed by Dreamer. Use systemctl edit dreamer for local unit overrides.
+[Unit]
+Description=Dreamer knowledge MCP service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=dreamer
+Group=dreamer
+WorkingDirectory=/var/lib/dreamer
+StateDirectory=dreamer
+StateDirectoryMode=0700
+EnvironmentFile=/etc/dreamer/dreamer.env
+ExecStart=/usr/local/bin/dreamer --config /etc/dreamer/dreamer.toml serve --allow-writes
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/dreamer
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

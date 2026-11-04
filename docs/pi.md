@@ -1,78 +1,111 @@
-# Raspberry Pi deployment
+# Always-on Pi service
 
-Use 64-bit Linux and build on the Pi with current stable Rust and C build tools.
-The default build bundles SQLite; a macOS executable will not run on the Pi.
-Nothing here installs a service or changes SSH credentials.
+Dreamer now supports an authenticated Streamable HTTP MCP endpoint, supervised by
+systemd. This mirrors SymNotes' `make deploy`, `restart`, `status` and `logs`
+workflow, with a native Rust binary and SQLite. SymNotes continues using port
+3444; Dreamer uses port 3445. No Docker, Pi GitHub token or Mac collector is needed
+to run the knowledge service.
 
-## Build and initialize
+## First installation
 
-After pushing the MCP changes and pulling them into your Pi checkout:
-
-```sh
-cargo build --locked --release
-./target/release/dreamer --config fixtures/demo.toml db init
-./target/release/dreamer --config fixtures/demo.toml lesson add --file fixtures/sample-lesson.json
-./target/release/dreamer --config fixtures/demo.toml lesson search --query pagination
-```
-
-This creates an isolated synthetic demo database. `db init` applies migrations;
-MCP startup requires an existing current schema and will not migrate it.
-
-For real knowledge, keep config/data outside the checkout, use an absolute
-`data_dir` and configure the chosen repository scope. Back up before migrations.
-A stable binary path such as `/opt/dreamer/bin/dreamer` can be used later; no such
-installation is performed by this project.
-
-## Pi and Mac split
-
-SQLite and stdio MCP are implemented. The Pi owns its local database. Clients
-launch on-demand Dreamer processes on the Pi through SSH; no always-on daemon or
-HTTP port is required. The Mac already has private-repository access and will
-collect/refine knowledge through a future Mac component, submitting candidates
-through the implemented write tool. The Pi needs no GitHub credential.
-
-Do not synchronize the SQLite file via SMB/NFS or copy it between machines.
-Clients call MCP operations against the Pi's local database. Collection,
-scheduling, model refinement and status-promotion workflows remain pending.
-
-## MCP over SSH
-
-Use the absolute binary/config paths in [examples/codex.pi.toml](../examples/codex.pi.toml).
-The client runs the equivalent of:
+After pushing these changes and pulling them on the Pi:
 
 ```sh
-ssh -T -o BatchMode=yes your-user@your-pi /absolute/path/to/dreamer --config /absolute/path/to/dreamer.toml mcp
+cd /home/danutz/Development/dreamer
+make install-service
+make status
 ```
 
-A bare invocation waits for an MCP client on stdin. Use `mcp --allow-writes` only
-for a process that should expose `submit_candidate`. The default tools are
-`search_lessons` and `get_lesson`. See [tool contracts and setup](mcp.md).
+Use 64-bit systemd Linux with current stable Rust, C build tools, make, Python 3.9+
+and sudo. The installer requests sudo for system configuration. It:
 
-SSH key/agent authentication and a verified host key must already work from the
-client's execution environment. Shell startup output must not contaminate stdout.
-Keep diagnostics on stderr and use `ssh -T` without a pseudo-terminal. Verify
-server discovery, search, and (when enabled) candidate submission in each client.
-An authenticated connection in one client does not register the server elsewhere.
+- Builds normally, then installs `/usr/local/bin/dreamer`.
+- Creates a dedicated, unprivileged `dreamer` user and `/var/lib/dreamer`.
+- Creates `/etc/dreamer/dreamer.toml` from the Pi template if missing.
+- Generates distinct read/write tokens once in `/etc/dreamer/dreamer.env`, owned
+  by root with mode 0600. Secret values are never printed.
+- Stops an existing service, backs up its database consistently through SQLite's
+  backup API to `/var/backups/dreamer`, and applies pending migrations as `dreamer`.
+- Installs/verifies the unit, enables it at boot, starts it and checks authenticated
+  `/health`. systemd restarts the process after failures.
 
-The write flag controls process capabilities; SSH/OS permissions control who can
-launch it or directly modify the database. An HTTP service with separate client
-identities/authentication is a later design. No HTTP listener or systemd unit is
-included in this version.
+Reinstallation preserves existing configuration, tokens and knowledge. An unmanaged
+unit causes a preflight failure; use `sudo systemctl edit dreamer` for local unit
+customization. The prior binary is retained as `/usr/local/bin/dreamer.previous`.
+Deployment is not transactional: if a later step fails, earlier changes/backups
+remain. Inspect the reported error and service logs before retrying or restoring.
 
-## Validation and backups
+The installer manages only `/var/lib/dreamer`; it refuses an installed config
+pointing elsewhere. Existing checkout/demo databases are preserved and are not
+copied into the new service automatically. If you already hold real knowledge in
+another database, plan a SQLite-consistent migration before switching clients.
 
-Local tests cover SQLite persistence and real stdio MCP exchanges. Native Pi
-linking/runtime and the live SSH/client connection must be verified on the Pi.
-Back up SQLite consistently through its backup facilities rather than copying a
-live main database without its WAL. Test restoration, retention and reboot behavior.
+## Access and tokens
 
-For system SQLite, install its development libraries and build with
-`--no-default-features`. An ARM Rust type check on a Mac without a Linux C cross
-compiler is:
+With the template's current LAN settings:
+
+```text
+http://192.168.0.25:3445/mcp
+```
+
+The template also allows the Pi's Tailscale address from SymNotes' instructions:
+`http://100.106.171.95:3445/mcp`. Review `[http].allowed_hosts` if addresses change.
+The native default listens on localhost; the Pi template deliberately binds all
+IPv4 interfaces to serve the existing private LAN/Tailscale network. Use private
+network access; put TLS in front before using an untrusted network.
+
+Every MCP and health request requires `Authorization: Bearer <token>`:
+
+| Environment variable | Access |
+| --- | --- |
+| `DREAMER_MCP_TOKEN` | Search/get only |
+| `DREAMER_MCP_WRITE_TOKEN` | Search/get plus candidate submission |
+
+Read the credentials locally with `sudoedit /etc/dreamer/dreamer.env` and transfer
+only the required token to each client through its private configuration. Do not
+commit or paste credentials into chats. Set the read token in the environment
+that launches Codex and use [examples/codex.http.toml](../examples/codex.http.toml).
+The future Mac collector uses the write token at the same URL. Browser Origin
+requests are rejected; this version targets native MCP clients and provides no UI
+or OAuth flow. Read and write legacy sessions are separated.
+
+## Updates and operation
+
+```sh
+# After pulling a reviewed update:
+make deploy
+make restart
+make status
+make logs
+```
+
+`make deploy` repeats the installer safely with existing config/tokens. Verify
+backups before code/schema updates and test restores. Service logs go to journald;
+credentials do not appear in the unit's command line or startup log. The service
+handles SIGTERM for shutdown/restart. Stop it with `sudo systemctl stop dreamer`;
+use `sudo systemctl disable --now dreamer` to disable boot startup.
+
+Local development can still use stdio/SSH. For foreground HTTP, initialize a local
+configuration's database, supply the token environment, then run:
+
+```sh
+./target/release/dreamer --config dreamer.toml serve
+# With a distinct write token also set:
+./target/release/dreamer --config dreamer.toml serve --allow-writes
+```
+
+## Verification limits
+
+Tests exercise real HTTP MCP clients, bearer roles, Origin/Host checks, payload
+limits, persistence and SIGTERM shutdown on macOS. Three simulated installer tests
+check config/token preservation, backups and preflight refusals without sudo or
+system changes. Installer syntax and make recipes are also checked locally;
+installing/verifying systemd and native Pi runtime
+must be checked on the Pi. ARM Rust type checks use:
 
 ```sh
 cargo check --locked --no-default-features --target aarch64-unknown-linux-gnu
 ```
 
-This skips compiling bundled C and does not link a Linux executable. Build the
-default bundled configuration natively on the Pi for deployment.
+That does not link a Linux executable. Build the default bundled SQLite version
+natively on the Pi, as `make install-service` does.

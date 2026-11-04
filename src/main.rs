@@ -22,7 +22,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Validate configuration and report capabilities; performs no writes.
-    Status,
+    Status {
+        /// Print deployment metadata as JSON; never includes credentials.
+        #[arg(long)]
+        json: bool,
+    },
     /// Create or migrate the local knowledge database.
     Db {
         #[command(subcommand)]
@@ -40,6 +44,12 @@ enum Command {
     /// Serve MCP over stdio. Requires an existing, current database.
     Mcp {
         /// Expose candidate submission in addition to read tools.
+        #[arg(long)]
+        allow_writes: bool,
+    },
+    /// Run the always-on authenticated HTTP MCP server.
+    Serve {
+        /// Enable a separate write token for candidate submission.
         #[arg(long)]
         allow_writes: bool,
     },
@@ -85,7 +95,17 @@ async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
     let config = Config::load(&cli.config)?;
     let database = config.data_dir.join("knowledge.sqlite3");
     match cli.command {
-        Command::Status => {
+        Command::Status { json: true } => {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "data_dir": config.data_dir,
+                    "repository": config.github.repository,
+                    "http": {"listen": config.http.listen.to_string(), "allowed_hosts": config.http.allowed_hosts}
+                })
+            );
+        }
+        Command::Status { json: false } => {
             println!(
                 "Dreamer {} — knowledge foundation",
                 env!("CARGO_PKG_VERSION")
@@ -99,9 +119,7 @@ async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
             println!("Persistent storage: SQLite (database not opened by status)");
             println!("GitHub ingestion: not implemented (future Mac component)");
             println!("Consolidation: not implemented");
-            println!(
-                "MCP: stdio (read-only by default; --allow-writes enables candidate submission)"
-            );
+            println!("MCP: stdio (read-only by default); authenticated HTTP with serve");
         }
         Command::Db {
             command: DbCommand::Init,
@@ -151,6 +169,7 @@ async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
             }
         },
         Command::Mcp { allow_writes } => mcp::serve_stdio(&config, allow_writes).await?,
+        Command::Serve { allow_writes } => mcp::http::serve(&config, allow_writes).await?,
         Command::Ingest | Command::Consolidate => unreachable!(),
     }
     Ok(ExitCode::SUCCESS)

@@ -4,15 +4,33 @@ A small Rust foundation for a Pi-hosted experience library for coding agents.
 The goal is to learn reusable, evidence-backed lessons from merged pull requests
 and let agents retrieve relevant lessons through MCP.
 
-**Knowledge storage and stdio MCP work.** SQLite migrations, candidate import,
+**Knowledge storage, stdio/HTTP MCP and Pi service deployment are implemented.**
+SQLite migrations, candidate import,
 retrieval, repository-scoped search and an MCP server are implemented. GitHub
-ingestion, a Mac collector, model refinement, scheduling and installed Pi deployment
-are pending. Dreamer does not call GitHub or models, or open a network listener.
+ingestion, a Mac collector, model refinement and scheduling are pending. Dreamer
+does not call GitHub or models. Pi service installation is explicit.
 
 The intended split is a Pi-hosted library/service and a Mac-side collector that
 uses the Mac's existing private-repository access. The Mac will submit/refine
 knowledge through the Pi's MCP boundary; the Pi does not need GitHub credentials.
-Clients can launch the server on the Pi through SSH; see [MCP setup](docs/mcp.md).
+Use [the Pi service setup](docs/pi.md) for an always-on HTTP endpoint, or launch
+a stdio server on demand through SSH. See [MCP setup](docs/mcp.md).
+
+## Always-on Pi service
+
+After pushing/pulling this version, run on the Pi:
+
+```sh
+cd /home/danutz/Development/dreamer
+make install-service
+make status
+```
+
+The sudo-assisted installer creates a dedicated account, private read/write tokens,
+SQLite storage under `/var/lib/dreamer` and `dreamer.service`, enabled at boot with
+failure restarts. The endpoint is `http://192.168.0.25:3445/mcp`. Existing config,
+tokens and knowledge are preserved on `make deploy`; database backups precede
+migrations. See [installation details and limits](docs/pi.md).
 
 ## Run
 
@@ -77,12 +95,13 @@ migrates the database. Migrate deliberately with `db init` before launching.
 | --- | --- | --- |
 | `search_lessons` | `repository`, `query`, optional `limit` | Default |
 | `get_lesson` | `repository`, `id` | Default |
-| `submit_candidate` | `lesson` object matching the fixture | `mcp --allow-writes` |
+| `submit_candidate` | `lesson` object matching the fixture | Opt-in write mode; HTTP requires the write token |
 
 Every tool enforces repository scope. Reads return structured JSON and matching
 text JSON. Submission uses the same candidate-only, atomic, idempotent store as
 the CLI. It cannot replace, verify or delete lessons. The write flag controls one
-process; SSH/OS permissions determine who can start it. There is no HTTP server.
+stdio process; SSH/OS permissions determine who can start it. HTTP `serve` uses
+separate bearer tokens to distinguish readers and candidate submitters.
 See [client configuration](docs/mcp.md) and the [Pi outline](docs/pi.md).
 
 ## Validate
@@ -96,6 +115,7 @@ cargo fmt --check
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 cargo build --locked --release
+python3 -B -m unittest discover -s tests -p 'test_install_service.py'
 ```
 
 Commit `Cargo.lock` for reproducible application builds. No license has been
@@ -112,7 +132,10 @@ src/store.rs           Repository-scoped storage/search interface
 src/store/sqlite.rs    Atomic SQLite candidate imports, reads and search
 migrations/           Embedded, append-only SQL migrations and a version ledger
 fixtures/             Synthetic PR lesson and isolated demo configuration
-src/mcp.rs             Stdio MCP server and opt-in candidate submission
+src/mcp.rs             Shared MCP tools and stdio transport
+src/mcp/http.rs        Authenticated HTTP transport and role separation
+deploy/               Pi config and systemd unit
+scripts/              Native Pi service installer
 src/main.rs            Local CLI and MCP process startup
 tests/                Configuration, persistence, CLI and real stdio MCP checks
 examples/             Credential-free local/Pi Codex configuration examples

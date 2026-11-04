@@ -1,8 +1,9 @@
 # Architecture and next steps
 
 One crate keeps the initial project easy to navigate. The SQLite adapter implements
-the storage port. The CLI and stdio MCP server use it; no persistent worker or
-network listener is installed.
+the storage port. CLI, stdio MCP and authenticated HTTP MCP share it. The optional
+Pi installer provides an always-on systemd service; collection/refinement stays
+on the Mac.
 
 Proposed flow:
 
@@ -11,7 +12,7 @@ Mac: private repo access → future collection/refinement → MCP submit_candida
                                                           ↓
 Pi:                                              SQLite knowledge library
                                                           ↓
-Agents on Mac or elsewhere ← MCP read tools ← Pi Dreamer process over SSH
+Agents on Mac or elsewhere ← MCP read tools ← Pi HTTP service (or stdio/SSH)
 ```
 
 ## Implemented storage foundation
@@ -34,7 +35,7 @@ Agents on Mac or elsewhere ← MCP read tools ← Pi Dreamer process over SSH
   deprecated lessons, uses literal substring matching and caps results at 100.
   Explicit get can retrieve deprecated lessons for inspection.
 - SQLite uses WAL and a five-second busy timeout. Separate local read connections
-  can see committed writes. This is not a distributed database or a service.
+  can see committed writes. The database stays local; MCP transports wrap the store.
 
 Validation checks completeness, repository syntax and 40-character commit SHAs.
 It does not fetch/verify sources, prove a lesson's truth, authenticate producers
@@ -43,11 +44,11 @@ must not be treated as an instruction or as a verified rule.
 
 ## Next steps
 
-1. Deploy and verify stdio MCP on the Pi. Reads are available by default;
-   `submit_candidate` requires `--allow-writes`. SSH/OS permissions govern who can
-   start each process. MCP uses bounded blocking workers and requires an existing,
-   current database; it never creates or migrates it. Clients must not share the
-   SQLite file itself over the network.
+1. Install and verify the HTTP service on the Pi. Read/write bearer tokens are
+   checked on every request, with separate legacy sessions. The installer creates
+   private configuration and a dedicated account, backs up before migrations, and
+   enables a hardened unit with restart-on-failure. Shared tools cap database work
+   at eight concurrent operations. Stdio/SSH remains available.
 2. Build the Mac collector using its existing private-repository access. Preserve
    final revisions and review context; implement pagination, sync cursors and
    retry/rate-limit handling on the collection side. The Pi needs no GitHub token.
@@ -65,13 +66,13 @@ must not be treated as an instruction or as a verified rule.
 - Treat source text as untrusted evidence. It cannot grant tool permissions or
   issue instructions to the consolidator or consuming agent.
 - Keep GitHub credentials on the Mac with read-only collection access. Keep all
-  credentials outside Git. Current remote authentication is delegated to SSH;
-  an HTTP service authentication/authorization layer is not implemented.
+  credentials outside Git. HTTP uses separate read/write bearer tokens; stdio/SSH
+  relies on SSH/OS access. HTTP validates Host and rejects browser Origin headers.
 - Keep company and personal collections separated. Decide what can be stored on
   the Pi and sent to a model before connecting private repositories.
 - Keep the library outside the checkout so code updates do not overwrite it.
   Plan SQLite-aware backups, retention and deletion of derived lessons.
-- Do not expose an unauthenticated HTTP listener. The first transport should be
-  stdio over SSH; remote HTTP access needs its own authentication and deployment design.
+- The Pi template follows SymNotes private LAN/Tailscale HTTP access. Add TLS for
+  untrusted networks. Tokens are generated on the Pi and never committed or logged.
 
 Only synthetic PR evidence and lessons are included in this repository.

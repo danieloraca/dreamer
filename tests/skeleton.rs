@@ -68,6 +68,21 @@ fn status_reads_example_config_and_reports_pending_adapters() {
     assert!(stdout.contains("GitHub ingestion: not implemented"));
     assert!(stdout.contains("MCP: stdio (read-only by default"));
     assert!(stdout.contains(concat!(env!("CARGO_MANIFEST_DIR"), "/data")));
+    let output = Command::new(env!("CARGO_BIN_EXE_dreamer"))
+        .args(["status", "--json", "--config"])
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/deploy/dreamer.toml"))
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(metadata["data_dir"], "/var/lib/dreamer");
+    assert_eq!(metadata["http"]["listen"], "0.0.0.0:3445");
+    assert!(
+        metadata["http"]["allowed_hosts"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("192.168.0.25"))
+    );
 }
 
 #[test]

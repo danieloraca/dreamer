@@ -1,5 +1,5 @@
 //! Dreamer's domain, local SQLite knowledge store and future adapter boundaries.
-//! Includes a stdio MCP adapter; network listeners and model integration are pending.
+//! Includes stdio and authenticated HTTP MCP adapters; model integration is pending.
 
 pub mod config;
 pub mod consolidation;

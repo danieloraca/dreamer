@@ -1,5 +1,7 @@
-//! MCP adapter for local stdio or an authenticated SSH pipe.
+//! MCP adapters for stdio/SSH and authenticated Streamable HTTP.
 //! Reads are always available; candidate submission is a process-level opt-in.
+
+pub mod http;
 
 use crate::{
     config::Config,

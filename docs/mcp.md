@@ -1,8 +1,19 @@
 # MCP setup
 
 Dreamer uses the [official Rust SDK](https://github.com/modelcontextprotocol/rust-sdk)
-over stdio. Local tests cover a real SDK client and the legacy `2025-06-18`
+over stdio and Streamable HTTP. Local tests cover real SDK clients and the legacy `2025-06-18`
 initialize/initialized handshake using raw newline-delimited JSON-RPC.
+
+## Always-on HTTP
+
+Use [the Pi service installer](pi.md) and [HTTP client example](../examples/codex.http.toml).
+The single `/mcp` endpoint accepts a read token for search/get or a separate write
+token for candidate submission. `serve` reads `DREAMER_MCP_TOKEN` from its
+environment; `serve --allow-writes` also requires `DREAMER_MCP_WRITE_TOKEN`. Missing,
+weak or identical tokens cause startup to fail. Native MCP requests must use an
+allowed Host and no browser Origin. Requests are limited to 1 MiB. `/health`
+requires either token and reports database readiness. Neither startup mode creates
+or migrates the database. HTTP logs go to stderr/journald.
 
 ## Local smoke test
 
@@ -54,7 +65,8 @@ provenance, status and storage time. Matching/order are the same as the CLI.
 `{ "repository": "...", "found": true, "lesson": { ... } }`, or `found: false`
 and `lesson: null`. Deprecated lessons remain available for explicit inspection.
 
-`submit_candidate` is advertised and callable only with `mcp --allow-writes`.
+For stdio, `submit_candidate` requires `mcp --allow-writes`; HTTP clients need the
+write token and a server started with `serve --allow-writes`.
 Its argument is `{ "lesson": { ... } }`; see the complete shape in
 [the fixture](../fixtures/sample-lesson.json). Responses contain `repository`,
 `id`, `status: "candidate"` and `outcome: "inserted"` or `"unchanged"`.
@@ -72,12 +84,14 @@ retry the identical candidate to resolve uncertainty without duplicate imports.
 ## Access and limitations
 
 Read-only mode hides and rejects writes and uses read-only database connections.
-The flag controls process capabilities, not individual users. Anyone who can
+For stdio, the flag controls process capabilities, not individual users. Anyone who can
 launch Dreamer with database write permissions can enable submission or use the
-CLI. Stronger separation needs distinct SSH/OS principals and file permissions,
-or a later authenticated service.
+CLI. Stricter stdio isolation needs distinct SSH/OS principals and file permissions;
+HTTP separates reader/writer access using bearer credentials.
 
-There is no HTTP listener, OAuth, running daemon, automatic collection, model
-refinement, verification or edit/delete workflow. Pi runtime and actual client
-registration need deployment-host verification; local tests do not establish a
-live Pi connection.
+HTTP enforces bearer roles on every request, with separate legacy session managers
+for read/write clients. Read tokens cannot acquire writer permissions by reusing
+a session ID. Credentials are removed before dispatch to protocol handlers.
+There is no OAuth, automatic collection, model refinement, verification or
+edit/delete workflow. Pi installation and actual client registration still require
+deployment-host verification; local tests do not establish a live Pi connection.

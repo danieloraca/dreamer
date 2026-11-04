@@ -1,0 +1,10 @@
+# Add this table to client config after installing the Pi service.
+# Set DREAMER_MCP_TOKEN privately in the environment that launches the client.
+[mcp_servers.dreamer]
+url = "http://192.168.0.25:3445/mcp"
+bearer_token_env_var = "DREAMER_MCP_TOKEN"
+startup_timeout_sec = 20
+tool_timeout_sec = 30
+
+# For a separate Mac collector, use the same URL with DREAMER_MCP_WRITE_TOKEN.
+# Read-token clients cannot discover or call submit_candidate.

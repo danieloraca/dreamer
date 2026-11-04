@@ -1,0 +1,15 @@
+# Pi service config. Installation preserves any existing /etc/dreamer/dreamer.toml.
+data_dir = "/var/lib/dreamer"
+
+[github]
+# Local collection scope only; no GitHub access happens on the Pi.
+repository = "geckolabs/Gecko-API"
+batch_size = 25
+
+[memory]
+default_search_limit = 5
+
+[http]
+listen = "0.0.0.0:3445"
+# LAN and Tailscale addresses from Dan's Pi / SymNotes setup. Adjust if they change.
+allowed_hosts = ["localhost", "127.0.0.1", "192.168.0.25", "100.106.171.95"]

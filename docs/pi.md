@@ -65,7 +65,7 @@ Read the credentials locally with `sudoedit /etc/dreamer/dreamer.env` and transf
 only the required token to each client through its private configuration. Do not
 commit or paste credentials into chats. Set the read token in the environment
 that launches Codex and use [examples/codex.http.toml](../examples/codex.http.toml).
-The future Mac collector uses the write token at the same URL. Browser Origin
+The Mac agent tools use the write token at the same URL. Browser Origin
 requests to MCP are rejected. The [dashboard](dashboard.md) uses a separate
 read-only browser API with the read token; there is no OAuth flow. Read and write legacy sessions are separated.
 

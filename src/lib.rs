@@ -8,3 +8,6 @@ pub mod ingest;
 pub mod lesson;
 pub mod mcp;
 pub mod store;
+
+#[cfg(feature = "mac-client")]
+pub mod mac;

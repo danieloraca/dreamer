@@ -71,7 +71,8 @@ write token and a server started with `serve --allow-writes`.
 Its argument is `{ "lesson": { ... } }`; see the complete shape in
 [the fixture](../fixtures/sample-lesson.json). Responses contain `repository`,
 `id`, `status: "candidate"` and `outcome: "inserted"` or `"unchanged"`.
-The manual Mac collector produces a local preview; publication is a separate writer operation.
+The batch collector produces a local preview. [Mac agent tools](agent-memory.md)
+automatically publish source-backed lessons extracted by the coding agent.
 
 All tools require the configured repository exactly. Invalid inputs, wrong scope
 and conflicts return `isError: true` with a code/message. Unknown/disabled tools
@@ -93,6 +94,6 @@ HTTP separates reader/writer access using bearer credentials.
 HTTP enforces bearer roles on every request, with separate legacy session managers
 for read/write clients. Read tokens cannot acquire writer permissions by reusing
 a session ID. Credentials are removed before dispatch to protocol handlers.
-There is no OAuth, automatic collection, model refinement, verification or
-edit/delete workflow. Pi installation and actual client registration still require
+There is no OAuth, unattended collection, standalone model refinement, verification
+or edit/delete workflow. On-demand agent learning uses the separate Mac tools. Pi installation and actual client registration still require
 deployment-host verification; local tests do not establish a live Pi connection.

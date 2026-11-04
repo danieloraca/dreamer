@@ -1,8 +1,9 @@
-//! Future model-assisted extraction. No model calls or automatic verification.
+//! Reserved standalone extraction port. The on-demand Mac MCP workflow uses the
+//! coding agent for extraction and publishes sourced candidates automatically.
 
 use crate::{ingest::github::PullRequestSnapshot, lesson::Lesson};
 
-/// Implementations must emit candidate lessons; verification is a separate step.
+/// Implementations must emit candidate lessons; candidate status does not imply a human approval queue.
 pub trait Consolidator {
     type Error: std::error::Error;
 

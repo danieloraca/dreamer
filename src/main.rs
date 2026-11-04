@@ -22,6 +22,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Mac-only agent tools: recall knowledge, capture PRs and remember sourced lessons.
+    #[cfg(feature = "mac-client")]
+    Mac {
+        #[arg(long)]
+        settings: PathBuf,
+        #[command(subcommand)]
+        command: dreamer::mac::MacCommand,
+    },
     /// Collect merged PR evidence and unverified draft prompts locally; never publishes.
     Collect {
         #[arg(long)]
@@ -125,6 +133,11 @@ async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
         println!("Local preview: {} (not published)", report.display());
         return Ok(ExitCode::SUCCESS);
     }
+    #[cfg(feature = "mac-client")]
+    if let Command::Mac { settings, command } = cli.command {
+        dreamer::mac::run(settings, command).await?;
+        return Ok(ExitCode::SUCCESS);
+    }
     let reserved = match &cli.command {
         Command::Ingest => Some("ingest"),
         Command::Consolidate => Some("consolidate"),
@@ -216,6 +229,8 @@ async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
         Command::Serve { allow_writes } => mcp::http::serve(&config, allow_writes).await?,
         Command::Ingest | Command::Consolidate => unreachable!(),
         Command::Collect { .. } => unreachable!(),
+        #[cfg(feature = "mac-client")]
+        Command::Mac { .. } => unreachable!(),
     }
     Ok(ExitCode::SUCCESS)
 }

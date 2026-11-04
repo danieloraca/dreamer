@@ -1,4 +1,7 @@
-# Manual Mac collector
+# Dry-run Mac collector
+
+For the on-demand recall/learn/store workflow without individual lesson approvals,
+see [agent memory](agent-memory.md). The `collect` command below remains a dry run.
 
 The first collector is a read-only GitHub CLI integration. It runs on the Mac,
 using `gh`'s existing login; no GitHub credential is copied to the Pi. Collection
@@ -67,10 +70,10 @@ make the lesson verified. Later commits are chronology, not proof of causation;
 a merged PR does not establish that a finding was fixed. Captured test changes
 are not evidence that the tests passed.
 
-The collector has no publish command. After reviewing the local preview, a separate
-authorized writer can submit each curated Lesson using `submit_candidate` with
-the Pi's write token. The read-token agent connection remains read-only. Scheduling,
-automatic consolidation and automated publication are deliberately pending.
+The dry-run collector never publishes. The [Mac agent tools](agent-memory.md)
+now let Codex capture a specific PR, inspect evidence and publish extracted lessons
+automatically through write-token MCP. The existing Pi agent connection remains
+read-only. Scheduling and unattended collection/consolidation remain pending.
 
 ## Held-out review protocol
 

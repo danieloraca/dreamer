@@ -131,10 +131,24 @@ pub fn capture(
     number: u64,
     pr: Value,
 ) -> Result<(Snapshot, String)> {
+    if pr["merged_at"].as_str().is_none() {
+        return Err("only a matching, merged pull request can enter the training batch".into());
+    }
+    capture_pr(api, repository, number, pr)
+}
+
+/// Capture a specific open/approved/merged PR for an agent. This does not approve it.
+pub fn capture_pr(
+    api: &impl GitHubApi,
+    repository: &str,
+    number: u64,
+    pr: Value,
+) -> Result<(Snapshot, String)> {
+    crate::lesson::validate_repository(repository)?;
     let root = format!("repos/{repository}");
     let pull = format!("{root}/pulls/{number}");
-    if pr["number"].as_u64() != Some(number) || pr["merged_at"].as_str().is_none() {
-        return Err("only a matching, merged pull request can enter the training batch".into());
+    if pr["number"].as_u64() != Some(number) {
+        return Err("GitHub returned a different pull request".into());
     }
     sha(text(&pr["head"], "sha"))?;
     sha(text(&pr["base"], "sha"))?;

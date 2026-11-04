@@ -3,12 +3,13 @@
 One crate keeps the initial project easy to navigate. The SQLite adapter implements
 the storage port. CLI, stdio MCP, authenticated HTTP MCP and the read-only dashboard share it. The optional
 Pi installer provides an always-on systemd service; collection/refinement stays
-on the Mac. Manual `collect` is implemented there; semantic refinement is pending.
+on the Mac. Optional Mac MCP tools let the coding agent recall, inspect PR evidence
+and automatically remember supported lessons; `collect` retains its dry-run mode.
 
 Proposed flow:
 
 ```text
-Mac: private repo access → collect → local preview → future refinement/MCP write
+Mac agent: recall → read PR evidence → extract lessons → MCP write
                                                           ↓
 Pi:                                              SQLite knowledge library
                                                           ↓
@@ -42,25 +43,19 @@ It does not fetch/verify sources, prove a lesson's truth, authenticate producers
 or approve a lesson. There is no status-transition or edit API. A candidate
 must not be treated as an instruction or as a verified rule.
 
-## Next steps
+## Agent memory loop
 
-1. Install and verify the HTTP service on the Pi. Read/write bearer tokens are
-   checked on every request, with separate legacy sessions. The installer creates
-   private configuration and a dedicated account, backs up before migrations, and
-   enables a hardened unit with restart-on-failure. Shared tools cap database work
-   at eight concurrent operations. Stdio/SSH remains available.
-2. Calibrate the manual Mac collector's local drafts and evaluation results. It
-   captures paginated GitHub evidence with a temporal holdout and completeness
-   checks. Incremental sync cursors, retry/backoff and scheduling remain pending.
-   The Pi needs no GitHub token. See [collector workflow](collector.md).
-3. Implement Mac-side extraction/refinement behind `Consolidator`. Submit candidates
-   with evidence; add an explicit, audited verification/supersession workflow
-   before enabling edits or promotion to verified lessons. Compare suggestions
-   against final code/tests; review comments alone do not establish correctness.
-4. Local protocol tests cover SDK discovery/calls, legacy initialization, write
-   restrictions, persistence and EOF shutdown. Test SSH and client registration
-   separately. Evaluate a held-out review before introducing regular collection,
-   semantic search or speculative suggestions.
+The optional `mac-client` features add on-demand Mac MCP tools for recall, PR
+capture, evidence inspection and automatic publication. Codex supplies the reasoning
+in its existing session. Scoped personal guidance makes recall part of normal
+planning/implementation/review, then learns from PRs read for that task. There is
+no per-lesson human approval gate. See [agent memory](agent-memory.md).
+
+The Pi remains the store and read/write MCP boundary. No GitHub/model credentials,
+watcher or extraction job run there. Exact normalized content is deduplicated;
+semantic consolidation, contradictory lessons and supersession remain future work.
+Lessons are usable candidates with evidence and asserted provenance, not verified
+rules. Any future verification/edit workflow should be optional oversight.
 
 ## Data and access
 

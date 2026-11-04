@@ -4,14 +4,20 @@ A Pi-hosted knowledge library for coding agents. Store evidence-backed lessons
 from pull requests and retrieve them through MCP.
 
 Built with Rust and SQLite. Candidate imports, search, and HTTP/stdio MCP are
-implemented. Manual GitHub collection produces local review drafts; automated
-semantic refinement and publishing are next.
+implemented. Mac MCP tools let Codex recall prior knowledge and automatically
+store source-backed lessons from the PRs it reads.
 
 ## Dashboard
 
 After deploying, open `http://<pi-address>:3445/` and enter the **read token**.
 Browse and search lessons, inspect applicability and follow their source evidence.
 No extra service or frontend build is needed. [Dashboard guide](docs/dashboard.md).
+
+## Agent memory on Mac
+
+Run `make install-mac`, then start a new Codex task. Codex recalls knowledge before
+coding and stores supported lessons from PRs it reads, without per-lesson approval.
+[Agent memory setup and tools](docs/agent-memory.md).
 
 ## Mac collector
 

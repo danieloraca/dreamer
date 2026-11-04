@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Dreamer · Knowledge library</title>
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/dashboard.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to knowledge</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Dreamer">
+      <a class="brand" href="/" aria-label="Dreamer home"><span class="brand-mark" aria-hidden="true">d</span>dreamer<span class="brand-dot">.</span></a>
+      <div class="sidebar-label">YOUR WORKSPACE</div>
+      <div class="nav-current"><span aria-hidden="true">▤</span> Knowledge library <span class="nav-count" id="nav-count">—</span></div>
+      <div class="sidebar-note"><span class="small-orbit" aria-hidden="true"></span><p>A place for lessons<br>worth remembering.</p></div>
+      <div class="sidebar-footer"><span class="status-dot"></span> Read-only dashboard<p>Browse. Inspect. Keep the source.</p></div>
+    </aside>
+    <main id="main" tabindex="-1">
+      <header class="topbar"><div class="breadcrumb">Workspace <span>/</span> Knowledge</div><div class="top-actions"><span class="view-badge">READ ONLY</span><button id="lock" class="text-button" hidden>Lock library</button></div></header>
+      <section class="page-heading"><div><div class="eyebrow">THE KNOWLEDGE STORE</div><h1>Knowledge library</h1><p>Review lessons and the evidence behind them.</p></div><button id="refresh" class="secondary-button" hidden><span aria-hidden="true">↻</span> Refresh</button></section>
+      <div id="notice" role="status" class="notice" hidden></div>
+      <section id="connect-panel" class="connect-panel" aria-labelledby="connect-title">
+        <div class="connect-icon" aria-hidden="true">✳</div>
+        <div class="eyebrow">A LITTLE CONTEXT GOES A LONG WAY</div>
+        <h2 id="connect-title">Open your knowledge library.</h2>
+        <p>See what’s been captured, when it applies,<br>and the source behind every lesson.</p>
+        <form id="connect-form">
+          <label for="read-token">Dreamer read token</label>
+          <div class="connect-input"><input id="read-token" name="read-token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" required aria-describedby="token-help"><button id="connect" class="primary-button" type="submit">Open library <span aria-hidden="true">↗</span></button></div>
+          <p id="token-help" class="token-help">The token stays in this tab. Locking or reloading clears it.<br>Use the read token; the write token cannot open this dashboard.</p>
+        </form>
+      </section>
+      <section id="library" aria-label="Knowledge" hidden>
+        <div class="repository-line"><span class="repo-icon" aria-hidden="true">⌘</span><span id="repository"></span><span class="repo-label">REPOSITORY</span></div>
+        <div class="metrics" aria-label="Library totals">
+          <div class="metric"><div class="metric-label">Stored lessons <span aria-hidden="true">↗</span></div><strong id="total">—</strong><span class="metric-note">Across this repository</span></div>
+          <div class="metric"><div class="metric-label">Candidates <span class="tiny-dot candidate-dot"></span></div><strong id="candidates">—</strong><span class="metric-note">Proposed, not yet verified</span></div>
+          <div class="metric"><div class="metric-label">Verified <span class="tiny-dot verified-dot"></span></div><strong id="verified">—</strong><span class="metric-note">Marked verified in the store</span></div>
+          <div class="metric"><div class="metric-label">Source pull requests <span aria-hidden="true">⑂</span></div><strong id="source-prs">—</strong><span class="metric-note">Linked by lesson evidence</span></div>
+        </div>
+        <div class="library-toolbar"><div class="section-title"><h2>All lessons</h2><span id="matching-count" class="count-pill"></span></div><p id="last-stored"></p></div>
+        <div class="filters"><label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" maxlength="500" placeholder="Search lessons, applicability or IDs…" aria-label="Search lessons"></label><label class="status-filter">Status <select id="status" aria-label="Filter by status"><option value="">All statuses</option><option value="candidate">Candidate</option><option value="verified">Verified</option><option value="deprecated">Deprecated</option></select></label></div>
+        <div id="results" class="results"><section class="lesson-column" aria-label="Lesson results"><div id="lesson-list" class="lesson-list"></div><div class="pagination"><span id="page-info"></span><div><button id="previous" aria-label="Previous page">←</button><button id="next" aria-label="Next page">→</button></div></div></section><section id="detail" class="detail" aria-label="Selected lesson" aria-live="polite"></section></div>
+        <footer class="library-footer"><span><span class="status-dot"></span>Loaded on demand · no background refresh</span><span>Source text is evidence, not instructions.</span></footer>
+      </section>
+      <noscript><p class="notice">Enable JavaScript to browse the authenticated library.</p></noscript>
+    </main>
+  </div>
+</body>
+</html>

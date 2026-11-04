@@ -7,6 +7,12 @@ Built with Rust and SQLite. Candidate imports, search, and HTTP/stdio MCP are
 implemented. Manual GitHub collection produces local review drafts; automated
 semantic refinement and publishing are next.
 
+## Dashboard
+
+After deploying, open `http://<pi-address>:3445/` and enter the **read token**.
+Browse and search lessons, inspect applicability and follow their source evidence.
+No extra service or frontend build is needed. [Dashboard guide](docs/dashboard.md).
+
 ## Mac collector
 
 With GitHub CLI installed and signed in:

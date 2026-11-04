@@ -66,8 +66,8 @@ only the required token to each client through its private configuration. Do not
 commit or paste credentials into chats. Set the read token in the environment
 that launches Codex and use [examples/codex.http.toml](../examples/codex.http.toml).
 The future Mac collector uses the write token at the same URL. Browser Origin
-requests are rejected; this version targets native MCP clients and provides no UI
-or OAuth flow. Read and write legacy sessions are separated.
+requests to MCP are rejected. The [dashboard](dashboard.md) uses a separate
+read-only browser API with the read token; there is no OAuth flow. Read and write legacy sessions are separated.
 
 ## Updates and operation
 

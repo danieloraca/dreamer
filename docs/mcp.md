@@ -11,7 +11,8 @@ The single `/mcp` endpoint accepts a read token for search/get or a separate wri
 token for candidate submission. `serve` reads `DREAMER_MCP_TOKEN` from its
 environment; `serve --allow-writes` also requires `DREAMER_MCP_WRITE_TOKEN`. Missing,
 weak or identical tokens cause startup to fail. Native MCP requests must use an
-allowed Host and no browser Origin. Requests are limited to 1 MiB. `/health`
+allowed Host and no browser Origin. A separate [read-only dashboard](dashboard.md)
+uses browser-facing HTTP routes; it does not send browser requests to MCP. Requests are limited to 1 MiB. `/health`
 requires either token and reports database readiness. Neither startup mode creates
 or migrates the database. HTTP logs go to stderr/journald.
 
@@ -70,7 +71,7 @@ write token and a server started with `serve --allow-writes`.
 Its argument is `{ "lesson": { ... } }`; see the complete shape in
 [the fixture](../fixtures/sample-lesson.json). Responses contain `repository`,
 `id`, `status: "candidate"` and `outcome: "inserted"` or `"unchanged"`.
-The future Mac collector can use this tool; no collector is included yet.
+The manual Mac collector produces a local preview; publication is a separate writer operation.
 
 All tools require the configured repository exactly. Invalid inputs, wrong scope
 and conflicts return `isError: true` with a code/message. Unknown/disabled tools

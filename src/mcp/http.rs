@@ -1,5 +1,7 @@
 //! Always-on HTTP transport. Credentials are checked on every request, not sessions.
 
+mod dashboard;
+
 use super::DreamerMcp;
 use crate::{config::Config, store::sqlite::SqliteStore};
 use axum::{
@@ -7,8 +9,9 @@ use axum::{
     body::Body,
     extract::{Request, State},
     http::{HeaderMap, StatusCode, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::any,
+    routing::{any, get},
 };
 use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
@@ -92,6 +95,7 @@ struct HttpState {
     read: McpService,
     write: Option<McpService>,
     database: std::path::PathBuf,
+    repository: String,
     allowed_hosts: Vec<String>,
     database_slots: Arc<tokio::sync::Semaphore>,
 }
@@ -132,21 +136,22 @@ pub fn router(
         read: service(reader, config, &shutdown),
         write: writer,
         database: config.data_dir.join("knowledge.sqlite3"),
+        repository: config.github.repository.clone(),
         allowed_hosts: config.http.allowed_hosts.clone(),
     };
     Ok(Router::new()
+        .route("/", get(dashboard::index))
+        .route("/dashboard.css", get(dashboard::css))
+        .route("/dashboard.js", get(dashboard::javascript))
+        .route("/api/knowledge", get(dashboard::knowledge))
         .route("/mcp", any(endpoint))
         .route("/health", any(endpoint))
+        .layer(middleware::from_fn_with_state(state.clone(), allowed_host))
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
         .with_state(state))
 }
 
-async fn endpoint(State(state): State<HttpState>, mut request: Request) -> Response {
-    // Native MCP clients send no Origin. Reject browser-origin requests, including
-    // null, until a browser client/CORS policy is deliberately supported.
-    if request.headers().contains_key(header::ORIGIN) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
+async fn allowed_host(State(state): State<HttpState>, request: Request, next: Next) -> Response {
     let host = request
         .headers()
         .get(header::HOST)
@@ -160,6 +165,15 @@ async fn endpoint(State(state): State<HttpState>, mut request: Request) -> Respo
                 .any(|host| host.eq_ignore_ascii_case(value.host()))
         })
     {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    next.run(request).await
+}
+
+async fn endpoint(State(state): State<HttpState>, mut request: Request) -> Response {
+    // Native MCP clients send no Origin. Reject browser-origin requests, including
+    // null, until a browser client/CORS policy is deliberately supported.
+    if request.headers().contains_key(header::ORIGIN) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let Some(write) = state.credentials.role(request.headers()) else {

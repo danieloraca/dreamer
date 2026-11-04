@@ -1,7 +1,7 @@
 # Architecture and next steps
 
 One crate keeps the initial project easy to navigate. The SQLite adapter implements
-the storage port. CLI, stdio MCP and authenticated HTTP MCP share it. The optional
+the storage port. CLI, stdio MCP, authenticated HTTP MCP and the read-only dashboard share it. The optional
 Pi installer provides an always-on systemd service; collection/refinement stays
 on the Mac. Manual `collect` is implemented there; semantic refinement is pending.
 

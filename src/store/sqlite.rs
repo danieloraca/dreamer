@@ -236,6 +236,76 @@ fn read_lesson(
     }))
 }
 
+impl SqliteStore {
+    /// Scope every aggregate/read to one repository, including deprecated records.
+    /// A deferred read transaction keeps counts and the page on one SQLite snapshot.
+    pub fn browse(
+        &mut self,
+        query: &super::BrowseQuery,
+    ) -> Result<super::KnowledgePage, StoreError> {
+        validate_repository(&query.repository).map_err(StoreError::Invalid)?;
+        if !(1..=50).contains(&query.limit)
+            || query.offset > 1_000_000
+            || query.text.chars().count() > 500
+            || query
+                .status
+                .as_deref()
+                .is_some_and(|status| !matches!(status, "candidate" | "verified" | "deprecated"))
+        {
+            return Err(StoreError::Invalid("invalid browse filter or pagination"));
+        }
+        let tx = self.connection.transaction()?;
+        let counts = tx.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(status = 'candidate'), 0),
+                    COALESCE(SUM(status = 'verified'), 0), COALESCE(SUM(status = 'deprecated'), 0),
+                    (SELECT COUNT(DISTINCT number) FROM pull_requests WHERE repository = ?1), MAX(stored_at)
+             FROM lessons WHERE repository = ?1",
+            params![query.repository],
+            |row| Ok(super::KnowledgeCounts { total: row.get(0)?, candidate: row.get(1)?,
+                verified: row.get(2)?, deprecated: row.get(3)?, source_prs: row.get(4)?, last_stored_at: row.get(5)? }),
+        )?;
+        let predicate = "repository = ?1 AND (?2 IS NULL OR status = ?2)
+            AND instr(lower(id || ' ' || summary || ' ' || applies_when), lower(?3)) > 0";
+        let matching = tx.query_row(
+            &format!("SELECT COUNT(*) FROM lessons WHERE {predicate}"),
+            params![query.repository, query.status, query.text.trim()],
+            |row| row.get(0),
+        )?;
+        let ids = {
+            let mut statement = tx.prepare(&format!(
+                "SELECT id FROM lessons WHERE {predicate} ORDER BY stored_at DESC, id ASC LIMIT ?4 OFFSET ?5"))?;
+            statement
+                .query_map(
+                    params![
+                        query.repository,
+                        query.status,
+                        query.text.trim(),
+                        query.limit as i64,
+                        query.offset as i64
+                    ],
+                    |row| row.get::<_, String>(0),
+                )?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let lessons = ids
+            .iter()
+            .map(|id| {
+                read_lesson(&tx, &query.repository, id)?
+                    .ok_or_else(|| StoreError::Schema("lesson disappeared during browse".into()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        tx.commit()?;
+        Ok(super::KnowledgePage {
+            repository: query.repository.clone(),
+            counts,
+            matching,
+            limit: query.limit,
+            offset: query.offset,
+            lessons,
+        })
+    }
+}
+
 impl LessonStore for SqliteStore {
     type Error = StoreError;
 

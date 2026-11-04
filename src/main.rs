@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use dreamer::{
+    collector::{self, CollectOptions, github::GhApi},
     config::Config,
     lesson::Lesson,
     mcp,
@@ -21,6 +22,24 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Collect merged PR evidence and unverified draft prompts locally; never publishes.
+    Collect {
+        #[arg(long)]
+        repository: String,
+        #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u32).range(1..=50))]
+        count: u32,
+        #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u32).range(1..=1000))]
+        scan_limit: u32,
+        /// Exclude this PR and use its creation time as the training cutoff.
+        #[arg(long)]
+        holdout: Option<u64>,
+        /// Optional RFC3339 merge/review cutoff, such as 2026-11-03T15:40:15Z.
+        #[arg(long)]
+        before: Option<chrono::DateTime<chrono::Utc>>,
+        /// New output directory. Existing batches are never overwritten.
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Validate configuration and report capabilities; performs no writes.
     Status {
         /// Print deployment metadata as JSON; never includes credentials.
@@ -83,6 +102,29 @@ enum LessonCommand {
 }
 
 async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
+    if let Command::Collect {
+        repository,
+        count,
+        scan_limit,
+        holdout,
+        before,
+        output,
+    } = cli.command
+    {
+        let report = collector::collect(
+            &GhApi,
+            &CollectOptions {
+                repository,
+                count: count as usize,
+                scan_limit: scan_limit as usize,
+                holdout,
+                before,
+                output,
+            },
+        )?;
+        println!("Local preview: {} (not published)", report.display());
+        return Ok(ExitCode::SUCCESS);
+    }
     let reserved = match &cli.command {
         Command::Ingest => Some("ingest"),
         Command::Consolidate => Some("consolidate"),
@@ -117,7 +159,9 @@ async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
                 config.data_dir.display()
             );
             println!("Persistent storage: SQLite (database not opened by status)");
-            println!("GitHub ingestion: not implemented (future Mac component)");
+            println!(
+                "GitHub collection: manual dry-run with collect; automatic ingestion: not implemented"
+            );
             println!("Consolidation: not implemented");
             println!("MCP: stdio (read-only by default); authenticated HTTP with serve");
         }
@@ -171,6 +215,7 @@ async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
         Command::Mcp { allow_writes } => mcp::serve_stdio(&config, allow_writes).await?,
         Command::Serve { allow_writes } => mcp::http::serve(&config, allow_writes).await?,
         Command::Ingest | Command::Consolidate => unreachable!(),
+        Command::Collect { .. } => unreachable!(),
     }
     Ok(ExitCode::SUCCESS)
 }

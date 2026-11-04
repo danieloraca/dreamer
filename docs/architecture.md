@@ -3,12 +3,12 @@
 One crate keeps the initial project easy to navigate. The SQLite adapter implements
 the storage port. CLI, stdio MCP and authenticated HTTP MCP share it. The optional
 Pi installer provides an always-on systemd service; collection/refinement stays
-on the Mac.
+on the Mac. Manual `collect` is implemented there; semantic refinement is pending.
 
 Proposed flow:
 
 ```text
-Mac: private repo access → future collection/refinement → MCP submit_candidate
+Mac: private repo access → collect → local preview → future refinement/MCP write
                                                           ↓
 Pi:                                              SQLite knowledge library
                                                           ↓
@@ -49,9 +49,10 @@ must not be treated as an instruction or as a verified rule.
    private configuration and a dedicated account, backs up before migrations, and
    enables a hardened unit with restart-on-failure. Shared tools cap database work
    at eight concurrent operations. Stdio/SSH remains available.
-2. Build the Mac collector using its existing private-repository access. Preserve
-   final revisions and review context; implement pagination, sync cursors and
-   retry/rate-limit handling on the collection side. The Pi needs no GitHub token.
+2. Calibrate the manual Mac collector's local drafts and evaluation results. It
+   captures paginated GitHub evidence with a temporal holdout and completeness
+   checks. Incremental sync cursors, retry/backoff and scheduling remain pending.
+   The Pi needs no GitHub token. See [collector workflow](collector.md).
 3. Implement Mac-side extraction/refinement behind `Consolidator`. Submit candidates
    with evidence; add an explicit, audited verification/supersession workflow
    before enabling edits or promotion to verified lessons. Compare suggestions

@@ -65,7 +65,7 @@ fn status_reads_example_config_and_reports_pending_adapters() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("Configuration: valid"));
-    assert!(stdout.contains("GitHub ingestion: not implemented"));
+    assert!(stdout.contains("GitHub collection: manual dry-run with collect"));
     assert!(stdout.contains("MCP: stdio (read-only by default"));
     assert!(stdout.contains(concat!(env!("CARGO_MANIFEST_DIR"), "/data")));
     let output = Command::new(env!("CARGO_BIN_EXE_dreamer"))

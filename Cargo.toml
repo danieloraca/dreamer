@@ -19,6 +19,9 @@ tokio-util = "0.7"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["limit"] }
 subtle = "2.6"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+sha2 = "0.10"
+url = "2.5"
 
 [features]
 default = ["bundled-sqlite"]

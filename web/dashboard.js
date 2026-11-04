@@ -56,7 +56,7 @@
     const eyebrow = node('div', 'detail-eyebrow');
     eyebrow.append(node('span', '', 'LESSON DETAIL'), badge(lesson.status));
     detail.append(eyebrow, node('h2', '', lesson.summary), node('code', 'detail-id', lesson.id));
-    const warnings = {candidate:'A proposed lesson, not a verified rule. Inspect its source and applicability before using it.', verified:'Marked verified in the store. Inspect the evidence and applicability for your current change.', deprecated:'This lesson is deprecated. It remains visible for context and is excluded from MCP searches.'};
+    const warnings = {candidate:'Already available to agents as learned knowledge. Its evidence has not been independently verified; agents should assess applicability to the current task.', verified:'Marked verified in the store. Inspect the evidence and applicability for your current change.', deprecated:'This lesson is deprecated. It remains visible for context and is excluded from MCP searches.'};
     detail.append(node('p', 'candidate-note', warnings[lesson.status]));
     const applies = node('section', 'detail-section');
     applies.append(node('h3', '', 'When to use this'), node('p', '', lesson.applies_when));

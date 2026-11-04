@@ -42,7 +42,7 @@ fn local_fixture_can_be_added_searched_and_retrieved_across_cli_processes() {
     let (directory, config) = setup();
     success(run(&config, &["status"]));
     assert!(!directory.path().join("data").exists());
-    assert!(success(run(&config, &["db", "init"])).contains("schema 3"));
+    assert!(success(run(&config, &["db", "init"])).contains("schema 4"));
     assert!(
         success(run(&config, &["lesson", "add", "--file", FIXTURE])).contains("Inserted candidate")
     );
@@ -68,6 +68,13 @@ fn local_fixture_can_be_added_searched_and_retrieved_across_cli_processes() {
     )))
     .unwrap();
     assert_eq!(record, results[0]);
+    let ranked: Value = serde_json::from_str(&success(run(
+        &config,
+        &["lesson", "recall", "--query", "pagination"],
+    )))
+    .unwrap();
+    assert_eq!(ranked["lessons"][0]["lesson"]["id"], "pagination-scope-001");
+    assert!(ranked["lessons"][0]["relevance"]["score"].as_u64().unwrap() > 0);
     let missing = run(&config, &["lesson", "get", "--id", "absent"]);
     assert_eq!(missing.status.code(), Some(1));
     let invalid_limit = run(

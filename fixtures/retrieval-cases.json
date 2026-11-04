@@ -1,0 +1,20 @@
+{
+  "lessons": [
+    {"id":"a-locks","summary":"Acquire entity locks before mutating a hierarchy.","applies_when":"When editing entity trees; not for exports or read-only formatting."},
+    {"id":"b-exports","summary":"Preserve export configuration when resetting a clone checkpoint.","applies_when":"When cloning exports and changing column layout.","scope":{"components":["exports"],"paths":["src/Export/"]}},
+    {"id":"c-layout","summary":"Keep layout names stable during formatting.","applies_when":"When adjusting layouts and response formatting."},
+    {"id":"d-tenant","summary":"Scope account queries before pagination.","applies_when":"When changing account-scoped listing endpoints.","scope":{"components":["tenancy"],"paths":["src/List/"],"excluded_terms":["public endpoints"]}},
+    {"id":"e-queues","summary":"Wait for commit before dispatching background jobs.","applies_when":"When publishing asynchronous work.","scope":{"components":["queues"],"paths":["src/Jobs/"],"excluded_terms":["synchronous"]}},
+    {"id":"f-tls","summary":"Roll out capable database clients before requiring TLS.","applies_when":"When enabling database transport enforcement.","scope":{"components":["database"],"paths":["deploy/"]}}
+  ],
+  "cases": [
+    {"name":"export exclusion-only match","queries":["export"],"expected":["b-exports"],"absent":["a-locks"]},
+    {"name":"formatting exclusion-only match","queries":["formatting"],"expected":["c-layout"],"absent":["a-locks"]},
+    {"name":"account and pagination","queries":["account","pagination"],"expected":["d-tenant"]},
+    {"name":"file context without vocabulary overlap","queries":["opaque-task"],"paths":["src/Jobs/Delivery.rs"],"expected":["e-queues"]},
+    {"name":"component context without vocabulary overlap","queries":["opaque-task"],"components":["DATABASE"],"expected":["f-tls"]},
+    {"name":"explicit excluded task phrase","queries":["public endpoints","account"],"expected":[],"absent":["d-tenant"]},
+    {"name":"explicit excluded task word","queries":["synchronous","commit"],"expected":[],"absent":["e-queues"]},
+    {"name":"excluded word is not an arbitrary substring","queries":["asynchronous","commit"],"expected":["e-queues"]}
+  ]
+}

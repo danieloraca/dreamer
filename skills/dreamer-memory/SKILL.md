@@ -29,15 +29,20 @@ Discover Dreamer's available tools. Call `list_repositories` to see configured s
 resolve the actual task repository from the checkout/PR and select it explicitly.
 Never combine another repository's lessons by default. Prefer one Mac
 `recall_knowledge` call with a few short task/component terms and the explicit
-repository. It returns five compact previews by default (maximum ten; 12 KB cap).
+repository. Add relevant `components` and repository-relative `paths` when known;
+these improve context ranking. It returns five compact previews by default (maximum ten; 12 KB cap).
 Fetch `get_knowledge` only for the useful IDs, usually one to three; inspect full
 applicability and evidence before applying a lesson. Shortened previews can omit
 exclusions. Refine overly broad terms rather than repeatedly loading more records.
 Reuse what you have already read during the task; recall again when scope changes.
 
-With only Pi tools, use `search_lessons` with a small limit (e.g. three), then
-`get_lesson` as needed. Literal matches can include exclusions; discard those
-matches. Use relevant lessons alongside current source and tests. A miss does not
+With only Pi tools, prefer `recall_lessons` with a few terms and component/file
+context, then `get_lesson` as needed. If only literal `search_lessons` is available,
+use a small limit (e.g. three). Literal matches can include exclusions; discard those
+matches. Read explicit scope exclusions and conflict history before applying a preview.
+Scores are ranking hints, not confidence. An older Pi is labeled `legacy_fallback`;
+it cannot discover context-only matches absent from literal results. Scoped writes
+need the upgraded Pi. Use relevant lessons alongside current source and tests. A miss does not
 establish that no knowledge exists. If unavailable, say so and continue.
 
 ## Learn from PRs being read
@@ -60,7 +65,9 @@ When the task includes reading a PR in the configured repository, use the Mac to
    receipt, so repeated requests do not re-extract it. An open unapproved PR supplies task
    context; return after approval or merge to learn from settled feedback.
 4. `remember_pr_lessons` automatically publishes the supported lessons. Provide
-   summary, applies_when and inspected evidence IDs. It constructs source metadata,
+   summary, applies_when and inspected evidence IDs. Optional `scope` supplies
+   supported components, relative file/directory paths and explicit excluded task
+   phrases; do not assume a cited source path alone establishes applicability. It constructs source metadata,
    deduplicates exact normalized content, checks the current PR and reads back
    stored records, then saves a local completion receipt. Retry the same drafts
    after a disconnected/uncertain write; incomplete writes never mark a PR done.

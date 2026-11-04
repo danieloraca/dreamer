@@ -61,12 +61,14 @@ is explicitly flagged as shortened; exclusions can be outside the preview.
 `get_knowledge` accepts the same repository and a selected ID, returning full
 applicability, provenance and evidence. Fetch details only for useful matches.
 
-Matches rank by the number of distinct query terms that found each lesson, with
-stable ID ordering for ties. This is lexical overlap, not semantic confidence.
-`truncated` means the reply limit/budget was reached or an upstream 20-per-query
-search may be incomplete; `matched_count` counts only retrieved unique matches.
-Refine broad queries. Existing Pi `search_lessons`/`get_lesson` tools remain
-available, but full records from those tools cost more context; use a small limit.
+Recall accepts optional `components` and `paths`; the shared lexical/context
+ranker prefers useful text and explicit scope matches, suppressing common
+exclusion-only matches. Previews include bounded scope/context hints and explicit
+conflict counts. Scores are not semantic confidence. The Mac prefers Pi
+`recall_lessons` and labels an older-Pi local fallback when needed.
+See [retrieval behavior, limits and evaluation](retrieval.md). Literal
+`search_lessons`/`get_lesson` remain available, but use a small search limit and
+inspect exclusions; literal search retains its earlier behavior.
 
 When reading a relevant PR for the user's task:
 
@@ -100,8 +102,9 @@ from the same evidence. Older complete publication journals are recognized after
 an exact capture match, then indexed for lightweight checks. Volatile older cache
 identities may require one fresh extraction. Failed/partial receipts never skip.
 
-These changes reduce what reaches Codex's context; the underlying Pi API/database
-is unchanged and needs no deployment. GitHub checks and stored PR evidence remain
+Compact previews reduce what reaches Codex's context. Ranked Pi retrieval and
+scoped candidate metadata now require the schema-4 update; older Pis use a bounded
+Mac fallback. GitHub checks and stored PR evidence remain
 local. New/changed PRs still require model reasoning and source reads. Byte budgets
 are not billed token measurements, and Codex's own review work also uses tokens.
 
@@ -113,8 +116,8 @@ on an unapproved PR, then learn from it after feedback settles.
 Every stored lesson remains a searchable **candidate**: provisional knowledge,
 not a manual approval queue. The legacy storage field `method: manual` means direct
 curation here, including agent curation; the producer explicitly identifies the
-automatic Codex agent workflow. It does not assert human verification. The database
-schema and existing Pi tool contracts remain compatible; no Pi migration is needed.
+automatic Codex agent workflow. It does not assert human verification. Existing candidate fields and literal Pi tool contracts remain compatible.
+Scoped metadata/ranked Pi retrieval requires schema 4; deploy the Pi update.
 
 ## Operational checks and limits
 

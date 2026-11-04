@@ -100,7 +100,8 @@ dreamer mac --settings ~/.config/dreamer/mac.toml reconcile --revision REVISION
 
 ## Deployment and recovery
 
-Schema 3 adds `lesson_changes` and indexes; existing rows and evidence are
+Schema 3 added `lesson_changes` and indexes; schema 4 now adds optional retrieval
+scope. Existing rows and evidence are
 preserved. The Pi installer stops the service, makes a SQLite-consistent backup,
 applies migrations and restarts/checks health. After committing/pushing this update,
 pull it on the Pi and run `make deploy`. Mac reconciliation requires the upgraded
@@ -108,7 +109,7 @@ Pi tools and reports an upgrade error when unavailable; existing recall/candidat
 publication remain compatible with the old Pi API. Update the Mac with
 `make install-mac` and start a new Codex task to load its tools/guidance.
 
-Older binaries reject schema 3. Rollback needs the matching pre-upgrade binary and
+Older binaries reject database versions newer than their supported schema. Rollback needs the matching pre-upgrade binary and
 consistent database backup; keep the newer DB separately and stop writers before
 any restore. Do not restore over an active WAL database. Scheduled backup/restore
 automation and richer dashboard history navigation remain later master-plan work.

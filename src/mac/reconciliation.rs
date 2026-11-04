@@ -73,6 +73,7 @@ pub async fn reconcile(
         .iter()
         .map(|draft| Draft {
             summary: draft.reason.clone(),
+            scope: Default::default(),
             applies_when: format!(
                 "Reconcile {} for lesson {} toward {:?} using this PR's inspected evidence.",
                 draft.action.as_str(),

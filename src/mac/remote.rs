@@ -84,61 +84,83 @@ pub async fn call(
         .ok_or_else(|| "Pi returned no structured result".into())
 }
 
+pub async fn supports(client: &RunningService<RoleClient, ()>, name: &str) -> Result<bool> {
+    let tools = tokio::time::timeout(Duration::from_secs(30), client.list_all_tools())
+        .await
+        .map_err(|_| "Pi tool discovery timed out")?
+        .map_err(|_| "Pi tool discovery failed")?;
+    Ok(tools.iter().any(|tool| tool.name == name))
+}
+
 /// A small context reply; the Pi API and full stored evidence remain unchanged.
 pub async fn recall(
     settings: &Settings,
     requested: Option<&str>,
     queries: Vec<String>,
     limit: usize,
+    components: Vec<String>,
+    paths: Vec<String>,
 ) -> Result<Value> {
-    if queries.is_empty()
-        || queries.len() > 6
-        || queries.iter().any(|q| q.trim().is_empty() || q.len() > 200)
-        || !(1..=10).contains(&limit)
-    {
-        return Err("recall needs 1–6 short query terms and a limit of 1–10".into());
-    }
     let repository = settings.select_repository(requested)?;
-    let queries: Vec<_> = queries
+    let mut query = crate::retrieval::RecallQuery {
+        repository: repository.clone(),
+        queries,
+        components,
+        paths,
+        limit,
+    };
+    query.validate()?;
+    if limit > 10 {
+        return Err("Mac recall limit must be 1–10".into());
+    }
+    query.queries = query
+        .queries
         .into_iter()
         .map(|q| q.trim().to_ascii_lowercase())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
+    query.limit = 20;
     let client = connect(settings).await?;
-    let result = async {
-        let mut lessons = BTreeMap::new();
-        let mut search_limited = false;
-        for query in &queries {
-            let value = call(
-                &client,
-                "search_lessons",
-                json!({"repository":repository,"query":query,"limit":20}),
-            )
-            .await?;
-            let matches = value["lessons"]
-                .as_array()
-                .ok_or("missing Pi lesson list")?;
-            search_limited |= matches.len() == 20;
-            let mut seen = BTreeSet::new();
-            for stored in matches {
-                let id = stored["lesson"]["id"]
-                    .as_str()
-                    .ok_or("missing lesson identity")?;
-                if stored["lesson"]["repository"] != repository {
-                    return Err("Pi returned a different repository".into());
-                }
-                if seen.insert(id) {
-                    let entry = lessons
-                        .entry(id.to_string())
-                        .or_insert((stored.clone(), 0usize));
-                    entry.1 += 1;
+    let result=async {
+        let tools=tokio::time::timeout(Duration::from_secs(30),client.list_all_tools()).await.map_err(|_|"Pi tool discovery timed out")?.map_err(|_|"Pi tool discovery failed")?;
+        let native=tools.iter().any(|tool|tool.name=="recall_lessons");
+        let mut candidates=BTreeMap::new();let mut limited=false;let mut server_count=None;
+        if native {
+            let reply=call(&client,"recall_lessons",json!({"repository":repository,"queries":query.queries,"components":query.components,"paths":query.paths,"limit":20})).await?;
+            limited=reply["truncated"]==true || reply["candidate_limit_reached"]==true;
+            server_count=reply["matched_count"].as_u64();
+            for stored in reply["lessons"].as_array().ok_or("missing Pi ranked lesson list")? {
+                let stored:crate::lesson::StoredLesson=serde_json::from_value(stored.clone())?;
+                if stored.lesson.repository!=repository {return Err("Pi returned a different repository".into());}
+                candidates.insert(stored.lesson.id.clone(),stored);
+            }
+        } else {
+            // Older Pis can still use the shared ranker over bounded literal results.
+            // They cannot discover a context-only match that literal search omitted.
+            for term in &query.queries {
+                let reply=call(&client,"search_lessons",json!({"repository":repository,"query":term,"limit":100})).await?;
+                let lessons=reply["lessons"].as_array().ok_or("missing Pi lesson list")?;
+                limited|=lessons.len()==100;
+                for stored in lessons {
+                    let stored:crate::lesson::StoredLesson=serde_json::from_value(stored.clone())?;
+                    if stored.lesson.repository!=repository {return Err("Pi returned a different repository".into());}
+                    candidates.insert(stored.lesson.id.clone(),stored);
                 }
             }
         }
-        compact_recall(&repository, &queries, limit, lessons, search_limited)
-    }
-    .await;
+        let ranked=crate::retrieval::rank(&query,candidates.into_values().collect(),limited)?;
+        let matched_count=server_count.unwrap_or(ranked.matched_count as u64);
+        let truncated=ranked.truncated;
+        let mut records=BTreeMap::new();
+        for hit in ranked.lessons {
+            records.insert(hit.stored.lesson.id.clone(),(serde_json::to_value(&hit)?,hit.relevance.matched_queries.len()));
+        }
+        let mut reply=compact_recall(&repository,&query.queries,limit,records,truncated)?;
+        reply["matched_count"]=json!(matched_count);
+        reply["retrieval_mode"]=json!(if native {"ranked"} else {"legacy_fallback"});
+        Ok(reply)
+    }.await;
     let _ = client.cancel().await;
     result
 }
@@ -184,11 +206,17 @@ fn compact_recall(
     let total = lessons.len();
     let mut ranked: Vec<_> = lessons.into_iter().collect();
     // Deterministic lexical overlap, not a semantic confidence score.
-    ranked.sort_by(|(a_id, (_, a_matches)), (b_id, (_, b_matches))| {
-        b_matches.cmp(a_matches).then_with(|| a_id.cmp(b_id))
+    ranked.sort_by(|(a_id, (a, a_matches)), (b_id, (b, b_matches))| {
+        let a_score = a["relevance"]["score"]
+            .as_u64()
+            .unwrap_or(*a_matches as u64);
+        let b_score = b["relevance"]["score"]
+            .as_u64()
+            .unwrap_or(*b_matches as u64);
+        b_score.cmp(&a_score).then_with(|| a_id.cmp(b_id))
     });
     let mut reply = json!({"repository":repository,"queries":queries,"matched_count":total,"search_limited":search_limited,"truncated":total>limit || search_limited,"lessons":[],
-        "guidance":"Compact lexical matches, not confidence scores. Fetch get_knowledge for selected IDs before applying; inspect conflict history; inspect full applicability and evidence. Shortened text can omit exclusions. Zero matches does not establish absence of knowledge."});
+        "guidance":"Lexical/context matches, not confidence scores. Fetch get_knowledge for selected IDs before applying; inspect conflict history; inspect full applicability and evidence. Shortened text can omit exclusions. Zero matches does not establish absence of knowledge."});
     for (id, (stored, matches)) in ranked.into_iter().take(limit) {
         let lesson = &stored["lesson"];
         let (summary, summary_shortened) = shortened(
@@ -213,9 +241,11 @@ fn compact_recall(
                 "has_successor":state.get("superseded_by").is_some(),
             })
         });
-        let preview = json!({"lesson":{"id":id,"summary":summary,"applies_when":applies_when,"status":lesson["status"]},"lifecycle":lifecycle,"matching_queries":matches,"evidence_count":evidence.len(),"source_prs":prs.into_iter().take(4).collect::<Vec<_>>(),"shortened":{"summary":summary_shortened,"applies_when":applicability_shortened},"needs_details":true});
+        let scope=lesson.get("scope").map(|scope|json!({"components":scope["components"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>()),"paths":scope["paths"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>()),"has_exclusions":scope["excluded_terms"].as_array().is_some_and(|v|!v.is_empty()),"preview_only":true}));
+        let context=stored.get("relevance").map(|r|json!({"score":r["score"],"matched_components":r["matched_components"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>()),"matched_paths":r["matched_paths"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>())}));
+        let preview = json!({"lesson":{"id":id,"summary":summary,"applies_when":applies_when,"status":lesson["status"]},"lifecycle":lifecycle,"scope":scope,"relevance":context,"matching_queries":matches,"evidence_count":evidence.len(),"source_prs":prs.into_iter().take(4).collect::<Vec<_>>(),"shortened":{"summary":summary_shortened,"applies_when":applicability_shortened},"needs_details":true});
         reply["lessons"].as_array_mut().unwrap().push(preview);
-        if serde_json::to_vec(&reply)?.len() > 12_000 {
+        if serde_json::to_vec(&reply)?.len() > 11_700 {
             reply["lessons"].as_array_mut().unwrap().pop();
             reply["truncated"] = json!(true);
             break;
@@ -231,7 +261,7 @@ mod tests {
     fn recall_bounds_context_without_silently_dropping_exclusions() {
         let mut records = BTreeMap::new();
         for n in 0..20 {
-            records.insert(format!("lesson-{n:02}"), (json!({"lesson":{"summary":"\"".repeat(1900),"applies_when":format!("{} Do not use for deletes.", "界".repeat(900)),"status":"candidate","evidence":[{"pull_request":{"number":123},"description":"full source".repeat(300)}],"provenance":{"producer":"agent"}}}), if n==19 {2} else {1}));
+            records.insert(format!("lesson-{n:02}"), (json!({"lesson":{"summary":"\"".repeat(1900),"applies_when":format!("{} Do not use for deletes.", "界".repeat(900)),"status":"candidate","evidence":[{"pull_request":{"number":123},"description":"full source".repeat(300)}],"provenance":{"producer":"agent"},"scope":{"components":["component".repeat(8)],"paths":vec![format!("src/{}/", "\"".repeat(140));3],"excluded_terms":["excluded"]}},"relevance":{"score":if n==19 {2}else{1},"matched_components":["component".repeat(8)],"matched_paths":vec![format!("src/{}/", "\"".repeat(140));3]}}), if n==19 {2} else {1}));
         }
         let reply =
             compact_recall("example/project", &["account".into()], 10, records, true).unwrap();

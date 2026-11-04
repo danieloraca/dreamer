@@ -66,6 +66,7 @@ cargo clippy --locked --all-targets -- -D warnings
 ## Documentation
 
 - [CI checks and local equivalents](docs/ci.md)
+- [Context-aware retrieval](docs/retrieval.md)
 
 - [Master plan and milestone status](docs/master-plan.md)
 - [Correcting and consolidating lessons](docs/lifecycle.md)

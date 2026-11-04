@@ -82,13 +82,44 @@ HTTP limit layer after macOS reset an unread TCP upload; live HTTP role tests re
 
 ## Milestone 2: improve retrieval
 
-Status: pending. Use the real trial's irrelevant matches to guide this work.
+Status: implemented and locally verified; Pi schema-4 rollout pending.
+Implementation began at `969b009`, after CI and milestone 1 were committed.
+Use the real trial's irrelevant matches to guide this work.
 
 Add explicit component/file applicability and useful relevance ordering while
 preserving repository isolation and bounded replies. Reduce matches caused solely
 by exclusions. Prefer a measured local search improvement before adding model
 calls or infrastructure. Verify useful retrieval, irrelevant matches, exclusions,
 response size and compatibility against a fixed representative query set.
+
+Implementation decisions: add optional immutable `scope` metadata (components,
+repository-relative file/directory paths, explicit excluded task phrases) through
+additive schema 4. Legacy lessons remain valid with empty metadata. Add scoped
+`recall_lessons` with deterministic weighted lexical/context ranking and a bounded
+candidate pool; keep literal `search_lessons` compatible. Recognize a conservative
+set of exclusion-only applicability clauses without treating this as full semantic
+understanding. Explicit excluded phrases match complete task words/phrases, not
+arbitrary substrings. Context scope boosts ranking, not confidence or authority.
+The Mac prefers ranked recall, falls back to the shared ranker over bounded legacy
+search candidates on older Pis, and preserves compact output/detail limits.
+Scoped candidate writes require the new Pi API. Verify scope/idempotency/upgrade,
+legacy behavior, fixed synthetic retrieval cases, fallback, isolation, exclusions,
+response budgets and native builds; do not modify production lessons to benchmark.
+
+Verification: the fixed eight-case synthetic cohort produces the expected top
+result or correct empty reply in 8/8 cases versus 2/8 for prior lexical/ID ordering.
+This is retrieval regression evidence, not real-review uplift. The schema-3
+upgrade preserves lesson/lifecycle history; the old-Pi fallback and scoped-write
+upgrade guard pass transport/CLI tests. Current local suites contain 67 Rust tests
+with Mac features and 53 default/server tests; six installer tests also pass.
+Clippy, formatting, skill validation and ARM Rust typecheck passed. Native Mac
+release and installed-client compatibility are recorded with the delivery report.
+The updated Mac client and skill are installed. A read-only live query used
+`legacy_fallback` against the current Pi and returned a 1,330-byte compact reply;
+both repository scopes, credentials and unrelated configuration were preserved.
+No production lessons were changed; schema-4 Pi deployment remains pending.
+The CI workflow was actionlint-validated and committed before this milestone;
+hosted results remain unverified until a GitHub run is observed.
 
 ## Milestone 3: make operation visible and recoverable
 

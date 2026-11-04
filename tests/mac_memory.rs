@@ -140,6 +140,7 @@ fn prepared(settings: &Settings, api: &Fake) -> (String, Vec<String>) {
 }
 fn draft(ids: Vec<String>) -> Draft {
     Draft {
+        scope: Default::default(),
         summary: "Apply account scope before paginating list results.".into(),
         applies_when:
             "Changing account-scoped list endpoints or pagination; inspect page boundaries.".into(),
@@ -1004,6 +1005,245 @@ async fn mac_reconciliation_resumes_partial_changes_and_never_hides_pending_work
             .await
             .is_err()
     );
+    stop.cancel();
+    task.await.unwrap();
+}
+
+async fn recall_command(settings: &Settings, args: &[&str]) -> Value {
+    let path = settings
+        .cache_dir
+        .parent()
+        .unwrap()
+        .join("recall-settings.toml");
+    fs::write(
+        &path,
+        format!(
+            "repository = {:?}\nendpoint = {:?}\nwriter_token_file = {:?}\ncache_dir = {:?}",
+            settings.repository, settings.endpoint, settings.writer_token_file, settings.cache_dir
+        ),
+    )
+    .unwrap();
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_dreamer"))
+        .arg("mac")
+        .arg("--settings")
+        .arg(path)
+        .arg("recall")
+        .args(args)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+#[tokio::test]
+async fn scoped_agent_learning_keeps_identity_and_pinned_sources_and_supports_context_recall() {
+    use dreamer::retrieval::LessonScope;
+    let dir = tempfile::tempdir().unwrap();
+    let mut settings = settings(dir.path());
+    let (url, stop, task, db) = backend(dir.path()).await;
+    settings.endpoint = url;
+    let api = Fake::new();
+    let (revision, ids) = prepared(&settings, &api);
+    evidence::read(
+        &settings,
+        &ReadInput {
+            revision: revision.clone(),
+            ids: ids.clone(),
+            offset: 0,
+            kind: None,
+            path: None,
+        },
+    )
+    .unwrap();
+    let original = evidence::build_lessons(&settings, &revision, &[draft(ids.clone())])
+        .unwrap()
+        .remove(0);
+    let mut scoped = draft(ids.clone());
+    scoped.scope = LessonScope {
+        components: vec!["Lists".into()],
+        paths: vec!["src/".into()],
+        excluded_terms: vec!["public endpoints".into()],
+    };
+    let candidate = evidence::build_lessons(&settings, &revision, &[scoped])
+        .unwrap()
+        .remove(0);
+    assert_ne!(candidate.id, original.id);
+    assert_eq!(candidate.scope.components, vec!["lists"]);
+    assert_eq!(candidate.evidence, original.evidence);
+    let mut scoped = draft(ids.clone());
+    scoped.scope = candidate.scope.clone();
+    evidence::remember(
+        &settings,
+        &api,
+        RememberInput {
+            revision: revision.clone(),
+            lessons: vec![scoped],
+            skip_reason: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        SqliteStore::open_read_only(&db)
+            .unwrap()
+            .get(REPO, &candidate.id)
+            .unwrap()
+            .unwrap()
+            .lesson
+            .scope,
+        candidate.scope
+    );
+    let recall = recall_command(
+        &settings,
+        &["--query", "opaque-task", "--path", "src/list.php"],
+    )
+    .await;
+    assert_eq!(recall["retrieval_mode"], "ranked");
+    assert_eq!(recall["lessons"][0]["lesson"]["id"], candidate.id);
+    assert!(recall["lessons"][0]["relevance"]["score"].as_u64().unwrap() > 0);
+    assert!(serde_json::to_vec(&recall).unwrap().len() <= 12000);
+    let excluded = recall_command(
+        &settings,
+        &["--query", "account", "--query", "public endpoints"],
+    )
+    .await;
+    assert!(excluded["lessons"].as_array().unwrap().is_empty());
+    stop.cancel();
+    task.await.unwrap();
+}
+
+#[derive(Clone)]
+struct LegacyPi {
+    database: std::path::PathBuf,
+}
+impl rmcp::ServerHandler for LegacyPi {
+    fn get_info(&self) -> rmcp::model::ServerConfig {
+        rmcp::model::ServerConfig::new(
+            rmcp::model::ServerCapabilities::builder()
+                .enable_tools()
+                .build(),
+        )
+    }
+    async fn list_tools(
+        &self,
+        _: Option<rmcp::model::PaginatedRequestParams>,
+        _: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
+        Ok(rmcp::model::ListToolsResult::with_all_items(
+            ["search_lessons", "get_lesson"]
+                .into_iter()
+                .map(|name| {
+                    rmcp::model::Tool::new(
+                        name,
+                        "Synthetic old Pi contract",
+                        json!({"type":"object"}).as_object().unwrap().clone(),
+                    )
+                })
+                .collect(),
+        ))
+    }
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        _: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
+        let args = Value::Object(request.arguments.unwrap_or_default());
+        assert_eq!(args["repository"], REPO);
+        let store = SqliteStore::open_read_only(&self.database).unwrap();
+        let value = match request.name.as_ref() {
+            "search_lessons" => {
+                json!({"repository":REPO,"lessons":store.search(&SearchQuery {repository:REPO.into(),text:args["query"].as_str().unwrap().into(),limit:args["limit"].as_u64().unwrap() as usize}).unwrap()})
+            }
+            "get_lesson" => {
+                let item = store.get(REPO, args["id"].as_str().unwrap()).unwrap();
+                json!({"found":item.is_some(),"lesson":item})
+            }
+            _ => panic!("Old Pi must not receive new ranked/scoped-write operations"),
+        };
+        Ok(rmcp::model::CallToolResult::structured(value).into())
+    }
+}
+#[tokio::test]
+async fn older_pi_fallback_uses_the_same_exclusion_guard_and_rejects_scoped_writes_before_mutation()
+{
+    use rmcp::transport::streamable_http_server::{
+        StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut settings = settings(dir.path());
+    let db = dir.path().join("legacy.sqlite3");
+    let mut store = SqliteStore::open(&db).unwrap();
+    let mut good: dreamer::lesson::Lesson =
+        serde_json::from_str(include_str!("../fixtures/sample-lesson.json")).unwrap();
+    good.repository = REPO.into();
+    good.id = "b-export".into();
+    good.summary = "Preserve export configuration during cloning.".into();
+    good.applies_when = "When cloning exports.".into();
+    store.put_candidate(&good).unwrap();
+    let mut irrelevant = good.clone();
+    irrelevant.id = "a-locks".into();
+    irrelevant.summary = "Lock entity mutations before editing.".into();
+    irrelevant.applies_when = "When editing entity hierarchies; not for exports.".into();
+    store.put_candidate(&irrelevant).unwrap();
+    drop(store);
+    let stop = CancellationToken::new();
+    let database = db.clone();
+    let service = StreamableHttpService::new(
+        move || {
+            Ok(LegacyPi {
+                database: database.clone(),
+            })
+        },
+        std::sync::Arc::new(LocalSessionManager::default()),
+        StreamableHttpServerConfig::default()
+            .with_json_response(true)
+            .with_cancellation_token(stop.child_token()),
+    );
+    let router = axum::Router::new().nest_service("/mcp", service);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    settings.endpoint = format!("http://{}/mcp", listener.local_addr().unwrap());
+    let shutdown = stop.clone();
+    let task = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown.cancelled_owned())
+            .await
+            .unwrap();
+    });
+    let recall = recall_command(&settings, &["--query", "export"]).await;
+    assert_eq!(recall["retrieval_mode"], "legacy_fallback");
+    assert_eq!(recall["lessons"].as_array().unwrap().len(), 1);
+    assert_eq!(recall["lessons"][0]["lesson"]["id"], good.id);
+    let api = Fake::new();
+    let (revision, ids) = prepared(&settings, &api);
+    evidence::read(
+        &settings,
+        &ReadInput {
+            revision: revision.clone(),
+            ids: ids.clone(),
+            offset: 0,
+            kind: None,
+            path: None,
+        },
+    )
+    .unwrap();
+    let mut scoped = draft(ids);
+    scoped.scope.components = vec!["lists".into()];
+    let error = evidence::remember(
+        &settings,
+        &api,
+        RememberInput {
+            revision,
+            lessons: vec![scoped],
+            skip_reason: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("Pi upgrade required"));
     stop.cancel();
     task.await.unwrap();
 }

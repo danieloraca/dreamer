@@ -63,6 +63,7 @@ impl LessonChange {
             summary: self.reason.clone(),
             applies_when: "Lesson lifecycle evidence".into(),
             status: LessonStatus::Candidate,
+            scope: Default::default(),
             provenance: Provenance {
                 producer: self.producer.clone(),
                 method: ExtractionMethod::Manual,
@@ -100,7 +101,7 @@ pub struct StoredChange {
     pub change: LessonChange,
     pub stored_at: String,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LifecycleSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub superseded_by: Option<String>,

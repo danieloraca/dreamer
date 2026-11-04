@@ -5,6 +5,7 @@ use dreamer::{
     lesson::Lesson,
     lifecycle::{HistoryQuery, LessonChange},
     mcp,
+    retrieval::RecallQuery,
     store::{LessonStore, SearchQuery, WriteOutcome, sqlite::SqliteStore},
 };
 use std::{error::Error, fs, path::PathBuf, process::ExitCode};
@@ -94,6 +95,17 @@ enum DbCommand {
 
 #[derive(Subcommand)]
 enum LessonCommand {
+    /// Rank active lessons by task terms and optional component/file context.
+    Recall {
+        #[arg(long, required = true)]
+        query: Vec<String>,
+        #[arg(long)]
+        component: Vec<String>,
+        #[arg(long)]
+        path: Vec<String>,
+        #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u32).range(1..=20))]
+        limit: u32,
+    },
     /// Append a source-backed supersede, retire or conflict event to an existing database.
     Change {
         #[arg(long)]
@@ -220,6 +232,21 @@ async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
                 repository.as_deref(),
             )?;
             match command {
+                LessonCommand::Recall {
+                    query,
+                    component,
+                    path,
+                    limit,
+                } => {
+                    let result = SqliteStore::open_read_only(&database)?.recall(&RecallQuery {
+                        repository: selected,
+                        queries: query,
+                        components: component,
+                        paths: path,
+                        limit: limit as usize,
+                    })?;
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                }
                 LessonCommand::Change { file } => {
                     let change: LessonChange = serde_json::from_slice(&fs::read(file)?)?;
                     change.validate()?;

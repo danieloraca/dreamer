@@ -98,6 +98,7 @@ async fn sdk_client_discovers_reads_and_enforces_read_only_repository_scope() {
             "list_repositories",
             "search_lessons",
             "get_lesson",
+            "recall_lessons",
             "get_lesson_history"
         ]
     );
@@ -296,7 +297,7 @@ async fn legacy_initialize_and_clean_eof_work_over_raw_json_rpc() {
         .await
         .unwrap();
     let tools = raw_request(&mut stdin, &mut stdout, 2, "tools/list", json!({})).await;
-    assert_eq!(tools["tools"].as_array().unwrap().len(), 4);
+    assert_eq!(tools["tools"].as_array().unwrap().len(), 5);
     let result = raw_request(&mut stdin, &mut stdout, 3, "tools/call", json!({"name": "search_lessons", "arguments": {"repository": REPOSITORY, "query": "pagination"}})).await;
     assert_eq!(
         result["structuredContent"]["lessons"]

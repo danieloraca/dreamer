@@ -42,7 +42,7 @@ impl MacMcp {
                 ),
                 crate::mcp::definition::<RecallInput>(
                     "recall_knowledge",
-                    "Recall repository knowledge before planning, implementing or reviewing code. Supply 1–6 short component/task terms. Defaults to five compact matches (max ten; 12 KB reply cap). Fetch get_knowledge for selected IDs before applying; inspect full applicability and evidence.",
+                    "Recall repository knowledge before planning, implementing or reviewing code. Supply 1–6 short task terms and optional components/paths for context ranking. Defaults to five compact matches (max ten; 12 KB reply cap). Fetch get_knowledge for selected IDs before applying; inspect full applicability and evidence.",
                     true,
                 ),
                 crate::mcp::definition::<GetInput>(
@@ -119,7 +119,7 @@ impl ServerHandler for MacMcp {
                 }
                 "recall_knowledge" => {
                     let input: RecallInput = parse(value)?;
-                    remote::recall(&settings, input.repository.as_deref(), input.queries, input.limit).await
+                    remote::recall(&settings, input.repository.as_deref(), input.queries, input.limit, input.components, input.paths).await
                 }
                 "get_knowledge" => {
                     let input: GetInput = parse(value)?;

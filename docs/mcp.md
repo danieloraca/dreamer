@@ -61,6 +61,11 @@ MCP. Keep the synthetic demo separate and SQLite on the Pi's local filesystem.
 `list_repositories` takes `{}` and returns the default and configured allowlist.
 See [repository configuration](repositories.md).
 
+`recall_lessons` accepts `repository`, 1–6 `queries`, optional `components` and
+`paths`, and `limit` (1–20). It returns ranked active lessons, bounded relevance
+signals, matched count and truncation flags. Prefer it for task guidance; see
+[retrieval contracts](retrieval.md). Literal search retains its existing behavior.
+
 `search_lessons` accepts `repository`, `query` and optional `limit` (1–100). It
 returns `{ "repository": "...", "lessons": [...] }`, including evidence,
 provenance, status and storage time. Matching/order are the same as the CLI.

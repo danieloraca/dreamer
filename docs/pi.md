@@ -121,3 +121,12 @@ and consistent backup, not just `dreamer.previous`. Keep the newer DB separately
 and stop the service before restoring. The Mac can still recall from an older Pi,
 but reconciliation reports that deployment is required. Scheduled backup/restore
 automation is a later milestone in the [master plan](master-plan.md).
+
+
+## Retrieval upgrade
+
+The current update also applies schema 4 for optional lesson component/path scope.
+`make deploy` backs up before applying every pending migration. Old lessons and
+lifecycle history are preserved. Older Mac clients can still use the literal
+search API; updated Mac clients fall back on an older Pi for recall, but scoped
+candidate publication requires the new Pi API. See [retrieval](retrieval.md).

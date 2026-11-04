@@ -14,3 +14,4 @@ pub mod store;
 pub mod mac;
 
 pub mod repository;
+pub mod retrieval;

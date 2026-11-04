@@ -119,6 +119,10 @@ pub enum MacCommand {
         repository: Option<String>,
         #[arg(long, required = true)]
         query: Vec<String>,
+        #[arg(long)]
+        component: Vec<String>,
+        #[arg(long)]
+        path: Vec<String>,
         #[arg(long, default_value_t = 5)]
         limit: usize,
     },
@@ -174,7 +178,7 @@ pub async fn run(path: PathBuf, command: MacCommand) -> std::result::Result<(), 
                     path: None,
                 },
             )?,
-            MacCommand::Recall { query, repository, limit } => remote::recall(&settings, repository.as_deref(), query, limit).await?,
+            MacCommand::Recall { query, repository, limit, component, path } => remote::recall(&settings, repository.as_deref(), query, limit, component, path).await?,
             MacCommand::Get { repository, id } => remote::get(&settings, repository.as_deref(), &id).await?,
             MacCommand::Reconcile { revision, file } => {
                 let changes=match file {Some(file)=>serde_json::from_slice(&fs::read(file)?)?,None=>Vec::new()};

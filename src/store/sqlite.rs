@@ -6,6 +6,7 @@ use crate::lesson::{
 use crate::lifecycle::{
     ChangeAction, HistoryPage, HistoryQuery, LessonChange, LifecycleSummary, StoredChange,
 };
+use crate::retrieval::{self, LessonScope, RecallPage, RecallQuery};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use std::{error::Error, fmt, path::Path, time::Duration};
 
@@ -30,6 +31,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 3,
         name: "lesson_lifecycle",
         sql: include_str!("../../migrations/0003_lesson_lifecycle.sql"),
+    },
+    Migration {
+        version: 4,
+        name: "lesson_scope",
+        sql: include_str!("../../migrations/0004_lesson_scope.sql"),
     },
 ];
 
@@ -237,12 +243,78 @@ fn read_lesson(
             summary,
             applies_when,
             status,
+            scope: read_scope(connection, repository, id)?,
             provenance: Provenance { producer, method },
             evidence,
         },
         stored_at,
         lifecycle: read_lifecycle(connection, repository, id)?,
     }))
+}
+
+fn read_scope(
+    connection: &Connection,
+    repository: &str,
+    id: &str,
+) -> Result<LessonScope, StoreError> {
+    let mut statement=connection.prepare("SELECT kind,value FROM lesson_scope WHERE repository=?1 AND lesson_id=?2 ORDER BY kind,ordinal")?;
+    let rows = statement
+        .query_map(params![repository, id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut scope = LessonScope::default();
+    for (kind, value) in rows {
+        match kind.as_str() {
+            "component" => scope.components.push(value),
+            "path" => scope.paths.push(value),
+            "exclude" => scope.excluded_terms.push(value),
+            _ => return Err(StoreError::Schema("unknown lesson scope kind".into())),
+        }
+    }
+    Ok(scope)
+}
+impl SqliteStore {
+    /// Parameterized candidate selection followed by the shared deterministic ranker.
+    pub fn recall(&self, query: &RecallQuery) -> Result<RecallPage, StoreError> {
+        query.validate().map_err(StoreError::Invalid)?;
+        let mut predicates = Vec::new();
+        let mut values = vec![query.repository.clone()];
+        for term in &query.queries {
+            values.push(term.trim().into());
+            let parameter = format!("?{}", values.len());
+            predicates.push(format!("(instr(lower(l.summary || ' ' || l.applies_when),lower({parameter}))>0 OR EXISTS(SELECT 1 FROM lesson_scope s WHERE s.repository=l.repository AND s.lesson_id=l.id AND s.kind!='exclude' AND instr(lower(s.value),lower({parameter}))>0))"));
+        }
+        for component in &query.components {
+            values.push(component.trim().into());
+            let parameter = format!("?{}", values.len());
+            predicates.push(format!("EXISTS(SELECT 1 FROM lesson_scope s WHERE s.repository=l.repository AND s.lesson_id=l.id AND s.kind='component' AND lower(s.value)=lower({parameter}))"));
+        }
+        for path in &query.paths {
+            values.push(path.clone());
+            let parameter = format!("?{}", values.len());
+            predicates.push(format!("EXISTS(SELECT 1 FROM lesson_scope s WHERE s.repository=l.repository AND s.lesson_id=l.id AND s.kind='path' AND (s.value={parameter} OR (substr(s.value,-1)='/' AND substr({parameter},1,length(s.value))=s.value)))"));
+        }
+        let tx = self.connection.unchecked_transaction()?;
+        let mut statement=tx.prepare(&format!("SELECT l.id FROM lessons l WHERE l.repository=?1 AND l.status!='deprecated' AND ({}) ORDER BY l.stored_at DESC,l.id ASC LIMIT 1001",predicates.join(" OR ")))?;
+        let ids = statement
+            .query_map(rusqlite::params_from_iter(values), |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let candidate_limit_reached = ids.len() > 1000;
+        let lessons = ids
+            .iter()
+            .take(1000)
+            .map(|id| {
+                read_lesson(&tx, &query.repository, id)?
+                    .ok_or_else(|| StoreError::Schema("recall candidate disappeared".into()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+        tx.commit()?;
+        retrieval::rank(query, lessons, candidate_limit_reached).map_err(StoreError::Invalid)
+    }
 }
 
 fn read_lifecycle(
@@ -536,6 +608,15 @@ impl LessonStore for SqliteStore {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![lesson.repository, lesson.id, ordinal as i64, pr.number, pr.head_sha, evidence.source_url, evidence.commit_sha, evidence.description],
             )?;
+        }
+        for (kind, values) in [
+            ("component", &lesson.scope.components),
+            ("path", &lesson.scope.paths),
+            ("exclude", &lesson.scope.excluded_terms),
+        ] {
+            for (ordinal, value) in values.iter().enumerate() {
+                transaction.execute("INSERT INTO lesson_scope(repository,lesson_id,kind,ordinal,value) VALUES (?1,?2,?3,?4,?5)",params![lesson.repository,lesson.id,kind,ordinal as i64,value])?;
+            }
         }
         transaction.commit()?;
         Ok(WriteOutcome::Inserted)

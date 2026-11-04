@@ -72,7 +72,7 @@ rather than assuming the broader list applies on both hosts.
 
 - Pi read, history, candidate and lifecycle tools validate the requested
   repository against the service's allowlist. A denied scope is never read/written.
-- Mac `recall_knowledge` accepts `repository` plus `queries`. Omission preserves the
+- Mac `recall_knowledge` accepts `repository`, `queries` and optional `components`/`paths`. Omission preserves the
   configured default, but agent guidance selects the actual task scope explicitly.
 - Mac `prepare_pr_learning` infers the repo from the supplied PR URL and validates
   it before GitHub access. Cached evidence, lesson IDs, provenance and publication

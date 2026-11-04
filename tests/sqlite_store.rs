@@ -29,17 +29,17 @@ fn migrations_are_repeatable_and_upgrade_an_older_database_without_losing_lesson
     let mut store = SqliteStore::open(&path).unwrap();
     let lesson = fixture();
     store.put_candidate(&lesson).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 3);
+    assert_eq!(store.schema_version().unwrap(), 4);
     drop(store);
 
     // Reproduce the exact v1 state: core tables/data, no v2 lookup indexes.
     let connection = Connection::open(&path).unwrap();
-    connection.execute_batch("DROP TABLE lesson_changes; DELETE FROM schema_migrations WHERE version = 3; DROP INDEX lessons_repository_status_time; DROP INDEX evidence_pull_request; DELETE FROM schema_migrations WHERE version = 2;").unwrap();
+    connection.execute_batch("DROP TABLE lesson_scope; DELETE FROM schema_migrations WHERE version = 4; DROP TABLE lesson_changes; DELETE FROM schema_migrations WHERE version = 3; DROP INDEX lessons_repository_status_time; DROP INDEX evidence_pull_request; DELETE FROM schema_migrations WHERE version = 2;").unwrap();
     drop(connection);
     assert!(SqliteStore::open_read_only(&path).is_err());
     for _ in 0..2 {
         let store = SqliteStore::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 3);
+        assert_eq!(store.schema_version().unwrap(), 4);
         assert_eq!(
             store
                 .get(&lesson.repository, &lesson.id)
@@ -55,7 +55,7 @@ fn migrations_are_repeatable_and_upgrade_an_older_database_without_losing_lesson
             row.get(0)
         })
         .unwrap();
-    assert_eq!(migrations, 3);
+    assert_eq!(migrations, 4);
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn newer_or_gapped_migration_histories_are_rejected_without_changing_data() {
     let connection = Connection::open(&path).unwrap();
     connection
         .execute(
-            "INSERT INTO schema_migrations (version, name) VALUES (4, 'future')",
+            "INSERT INTO schema_migrations (version, name) VALUES (5, 'future')",
             [],
         )
         .unwrap();
@@ -80,7 +80,7 @@ fn newer_or_gapped_migration_histories_are_rejected_without_changing_data() {
             row.get(0)
         })
         .unwrap();
-    assert_eq!(count, 3);
+    assert_eq!(count, 4);
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn existing_writer_never_creates_or_migrates_a_database() {
     assert!(!path.exists());
     drop(SqliteStore::open(&path).unwrap());
     let connection = Connection::open(&path).unwrap();
-    connection.execute_batch("DROP TABLE lesson_changes; DELETE FROM schema_migrations WHERE version = 3; DROP INDEX lessons_repository_status_time; DROP INDEX evidence_pull_request; DELETE FROM schema_migrations WHERE version = 2;").unwrap();
+    connection.execute_batch("DROP TABLE lesson_scope; DELETE FROM schema_migrations WHERE version = 4; DROP TABLE lesson_changes; DELETE FROM schema_migrations WHERE version = 3; DROP INDEX lessons_repository_status_time; DROP INDEX evidence_pull_request; DELETE FROM schema_migrations WHERE version = 2;").unwrap();
     assert!(SqliteStore::open_existing(&path).is_err());
     let version: i64 = connection
         .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {

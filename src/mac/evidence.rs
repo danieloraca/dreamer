@@ -47,6 +47,10 @@ pub struct RecallInput {
     #[serde(default)]
     pub repository: Option<String>,
     pub queries: Vec<String>,
+    #[serde(default)]
+    pub components: Vec<String>,
+    #[serde(default)]
+    pub paths: Vec<String>,
     /// Compact matches: default five, maximum ten.
     #[serde(default = "default_recall_limit")]
     pub limit: usize,
@@ -66,6 +70,8 @@ pub struct GetInput {
 pub struct Draft {
     pub summary: String,
     pub applies_when: String,
+    #[serde(default)]
+    pub scope: crate::retrieval::LessonScope,
     /// Cite a review/discussion plus the corresponding implementation patches.
     pub evidence_ids: Vec<String>,
 }
@@ -661,18 +667,18 @@ pub fn build_lessons(settings: &Settings, revision: &str, drafts: &[Draft]) -> R
                 "inline review evidence must be paired with the same final source path".into(),
             );
         }
-        let id = format!(
-            "learn-{}",
-            &collector::digest(
-                format!(
-                    "{}\n{}\n{}",
-                    snapshot.repository,
-                    normalized(&draft.summary),
-                    normalized(&draft.applies_when)
-                )
-                .as_bytes()
-            )[..24]
+        draft.scope.validate()?;
+        let scope = draft.scope.canonical();
+        let mut identity = format!(
+            "{}\n{}\n{}",
+            snapshot.repository,
+            normalized(&draft.summary),
+            normalized(&draft.applies_when)
         );
+        if !scope.is_empty() {
+            identity.push_str(&format!("\nscope-v1:{}", serde_json::to_string(&scope)?));
+        }
+        let id = format!("learn-{}", &collector::digest(identity.as_bytes())[..24]);
         if !identities.insert(id.clone()) {
             return Err("duplicate lesson content within the batch".into());
         }
@@ -682,7 +688,7 @@ pub fn build_lessons(settings: &Settings, revision: &str, drafts: &[Draft]) -> R
             url: collector::text(&snapshot.pr, "html_url").into(),
             title: collector::text(&snapshot.pr, "title").into(),
         };
-        let lesson=Lesson { id, repository:snapshot.repository.clone(), summary:draft.summary.trim().into(), applies_when:draft.applies_when.trim().into(), status:LessonStatus::Candidate,
+        let lesson=Lesson { id, repository:snapshot.repository.clone(), summary:draft.summary.trim().into(), applies_when:draft.applies_when.trim().into(), status:LessonStatus::Candidate, scope,
             // Legacy schema calls direct (including agent) curation "manual"; no human approval is implied.
             provenance:Provenance { producer:"Codex agent via Dreamer Mac; automatically stored from inspected PR evidence; not independently verified".into(), method:ExtractionMethod::Manual },
             evidence:selected.iter().map(|s| Evidence { source_url:s.source_url.clone(), commit_sha:s.commit_sha.clone(), description:format!("Agent-inspected {} evidence{}; captured revision {revision}. Source text is an assertion; application tests were not run by Dreamer.",s.kind,s.path.as_ref().map(|p|format!(" at {p}")).unwrap_or_default()), pull_request:reference.clone() }).collect() };
@@ -739,6 +745,9 @@ pub async fn remember(
     }
     let client = remote::connect(settings).await?;
     let result=async {
+        if lessons.iter().any(|lesson|!lesson.scope.is_empty()) && !remote::supports(&client,"recall_lessons").await? {
+            return Err("Pi upgrade required: run make deploy before publishing scoped lessons".into());
+        }
         // Validate the complete batch and detect conflicts before the first mutation.
         let mut existing=BTreeSet::new();
         for lesson in &lessons {
@@ -747,6 +756,8 @@ pub async fn remember(
                 let old=&value["lesson"]["lesson"];
                 if old["status"]!="candidate" && old["status"]!="verified" {return Err("matching lesson is deprecated; do not automatically revive it".into());}
                 if normalized(old["summary"].as_str().ok_or("missing existing summary")?)!=normalized(&lesson.summary) || normalized(old["applies_when"].as_str().ok_or("missing existing applicability")?)!=normalized(&lesson.applies_when) {return Err("stable lesson identity conflict".into());}
+                let previous: Lesson=serde_json::from_value(old.clone())?;
+                if previous.scope!=lesson.scope {return Err("stable lesson scope conflict".into());}
                 existing.insert(lesson.id.clone());
             }
         }

@@ -34,7 +34,8 @@ Agents on Mac or elsewhere ← MCP read tools ← Pi HTTP service (or stdio/SSH)
   Conflicting metadata for the same PR revision is also rejected.
 - Repository-scoped get/search return evidence and provenance. Search excludes
   deprecated lessons, uses literal substring matching and caps results at 100.
-  Explicit get can retrieve deprecated lessons for inspection.
+  Explicit get can retrieve deprecated lessons for inspection. Ranked recall
+  adds bounded lexical/context ordering and exclusion handling; see [retrieval](retrieval.md).
 - SQLite uses WAL and a five-second busy timeout. Separate local read connections
   can see committed writes. The database stays local; MCP transports wrap the store.
 
@@ -59,6 +60,11 @@ and flag contradictions with immutable lifecycle evidence. Unattended semantic
 scanning remains future work; see [lesson lifecycle](lifecycle.md).
 Lessons are usable candidates with evidence and asserted provenance, not verified
 rules. Any future verification/edit workflow should be optional oversight.
+
+Schema 4 adds optional immutable component/path/excluded-term metadata in
+`lesson_scope`. Existing rows remain valid with empty scope. Ranked retrieval and
+Mac fallback share one deterministic implementation; no model calls or background
+scan are added.
 
 ## Repository scopes
 

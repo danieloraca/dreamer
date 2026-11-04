@@ -51,16 +51,21 @@ pub struct Lesson {
     pub summary: String,
     pub applies_when: String,
     pub status: LessonStatus,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::retrieval::LessonScope::is_empty"
+    )]
+    pub scope: crate::retrieval::LessonScope,
     pub provenance: Provenance,
     pub evidence: Vec<Evidence>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredLesson {
     pub lesson: Lesson,
     /// UTC timestamp assigned by SQLite, independent of producer claims.
     pub stored_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<crate::lifecycle::LifecycleSummary>,
 }
 
@@ -98,6 +103,7 @@ impl Lesson {
     /// This checks completeness, not factual truth or verification authority.
     pub fn validate(&self) -> Result<(), &'static str> {
         validate_repository(&self.repository)?;
+        self.scope.validate()?;
         if [
             &self.id,
             &self.repository,

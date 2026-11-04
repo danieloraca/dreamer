@@ -5,6 +5,7 @@
   let page = null;
   let offset = 0;
   let selectedId = '';
+  let repository = '';
   let request = null;
   let debounce = null;
   const limit = 25;
@@ -24,13 +25,13 @@
     token = '';
     request?.abort();
     clearTimeout(debounce);
-    page = null; selectedId = ''; offset = 0;
+    page = null; selectedId = ''; offset = 0; repository = '';
     $('read-token').value = '';
     $('search').value = ''; $('status').value = '';
     $('library').hidden = true; $('connect-panel').hidden = false;
     $('lock').hidden = true; $('refresh').hidden = true;
     $('lesson-list').replaceChildren(); $('detail').replaceChildren();
-    $('repository').textContent = ''; $('nav-count').textContent = '—';
+    $('repository').replaceChildren(); $('nav-count').textContent = '—';
     notice(); $('read-token').focus();
   }
   function sourceLink(url, label) {
@@ -90,8 +91,14 @@
     detail.append(evidence);
   }
   function render() {
-    const {lessons, counts, matching, repository} = page;
-    $('repository').textContent = repository;
+    const {lessons, counts, matching} = page;
+    repository = page.repository;
+    $('repository').replaceChildren();
+    for (const name of page.repositories || [repository]) {
+      const option = node('option', '', name); option.value = name;
+      $('repository').append(option);
+    }
+    $('repository').value = repository;
     $('nav-count').textContent = counts.total;
     $('total').textContent = counts.total;
     $('candidates').textContent = counts.candidate;
@@ -139,18 +146,24 @@
     notice();
     const params = new URLSearchParams({q:$('search').value, limit:String(limit), offset:String(offset)});
     if ($('status').value) params.set('status', $('status').value);
+    if (repository) params.set('repository', repository);
     try {
       const response = await fetch(`/api/knowledge?${params}`, {headers:{Authorization:`Bearer ${token}`}, cache:'no-store', credentials:'omit', signal:active.signal, redirect:'error'});
+      if (request !== active || active.signal.aborted) return;
       if (response.status === 401) { lock(); notice('The read token was not accepted. Check the token and try again.'); return; }
       if (!response.ok) throw new Error('Library unavailable');
       const opening = !page;
-      page = await response.json();
+      const incoming = await response.json();
+      if (request !== active || active.signal.aborted) return;
+      if (repository && incoming.repository !== repository) throw new Error('Repository response mismatch');
+      if (incoming.lessons.some(item => item.lesson.repository !== incoming.repository)) throw new Error('Repository response mismatch');
+      page = incoming;
       render();
       $('connect-panel').hidden = true; $('library').hidden = false;
       $('lock').hidden = false; $('refresh').hidden = false;
       if (opening) $('search').focus();
     } catch (error) {
-      if (error.name !== 'AbortError') notice(page ? 'Could not refresh. You are viewing the last loaded data; try again.' : 'Could not load the library. Check the service connection and try again.');
+      if (request === active && error.name !== 'AbortError') notice(page ? 'Could not refresh. You are viewing the last loaded data; try again.' : 'Could not load the library. Check the service connection and try again.');
     } finally {
       if (request === active) {
         $('refresh').disabled = false; $('connect').disabled = false;
@@ -161,6 +174,17 @@
   }
   $('connect-form').addEventListener('submit', event => {
     event.preventDefault(); token = $('read-token').value.trim(); $('read-token').value = ''; offset = 0; load();
+  });
+  $('repository').addEventListener('change', () => {
+    clearTimeout(debounce); request?.abort();
+    repository = $('repository').value; page = null; selectedId = ''; offset = 0;
+    $('search').value = ''; $('status').value = '';
+    $('lesson-list').replaceChildren(node('div', 'empty-state', 'Loading repository knowledge…'));
+    $('detail').replaceChildren();
+    for (const id of ['total','candidates','verified','source-prs','matching-count','nav-count']) $(id).textContent = '—';
+    $('last-stored').textContent = ''; $('page-info').textContent = '';
+    $('previous').disabled = true; $('next').disabled = true;
+    load();
   });
   $('lock').addEventListener('click', lock);
   $('refresh').addEventListener('click', () => load());

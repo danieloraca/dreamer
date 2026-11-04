@@ -19,6 +19,7 @@ uses no cookies or local/session storage.
 
 ## What it shows
 
+- A repository selector for the [configured allowlist](repositories.md).
 - Repository totals: all stored lessons, candidate/verified counts, distinct source
   PR numbers and the latest storage date. These are storage facts, not quality scores.
 - Paginated lessons (25 per page), literal substring search over IDs, summaries
@@ -36,10 +37,10 @@ with no referrer or access to the original page.
 
 ## HTTP boundary
 
-`GET /api/knowledge` uses the service's configured repository; callers cannot
-select another scope. It requires the read bearer token, checks the allowed Host,
+`GET /api/knowledge` uses an explicitly selected allowlisted `repository`, defaulting to the legacy
+scope when omitted. Responses include the configured names for the selector. It requires the read bearer token, checks the allowed Host,
 rejects cross-site browser requests and mismatched Origin, and emits no CORS
-headers. It supports `q` (up to 500 characters), `status`, `limit` (1–50, default
+headers. It supports `repository`, `q` (up to 500 characters), `status`, `limit` (1–50, default
 25) and `offset` (up to 1,000,000). Unknown parameters are rejected.
 
 The HTML/CSS/JS shell is public but contains no credentials or lesson data. A

@@ -82,6 +82,7 @@ fn settings(root: &Path) -> Settings {
     private(&writer, &format!("DREAMER_MCP_WRITE_TOKEN={WRITE}\n"));
     Settings {
         repository: REPO.into(),
+        repositories: vec![],
         endpoint: "http://127.0.0.1:1/mcp".into(),
         writer_token_file: writer,
         cache_dir: root.join("cache"),
@@ -234,7 +235,7 @@ async fn backend(
     fs::create_dir(&dbroot).unwrap();
     let database = dbroot.join("knowledge.sqlite3");
     drop(SqliteStore::open(&database).unwrap());
-    let config=Config::parse(&format!("data_dir = {:?}\n[github]\nrepository = \"{REPO}\"\nbatch_size = 10\n[memory]\ndefault_search_limit = 5\n[http]\nlisten = \"127.0.0.1:0\"\nallowed_hosts = [\"127.0.0.1\"]",dbroot)).unwrap();
+    let config=Config::parse(&format!("data_dir = {:?}\n[github]\nrepository = \"{REPO}\"\nrepositories = [\"{REPO}\", \"example/second\"]\nbatch_size = 10\n[memory]\ndefault_search_limit = 5\n[http]\nlisten = \"127.0.0.1:0\"\nallowed_hosts = [\"127.0.0.1\"]",dbroot)).unwrap();
     let shutdown = CancellationToken::new();
     let router = http::router(
         &config,
@@ -389,7 +390,7 @@ async fn mac_stdio_exposes_workflow_tools_without_opening_github_or_pi() {
     command.arg("mac").arg("--settings").arg(path).arg("mcp");
     let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 4);
+    assert_eq!(tools.len(), 5);
     let error = client
         .call_tool(
             CallToolRequestParams::new("recall_knowledge")
@@ -400,4 +401,137 @@ async fn mac_stdio_exposes_workflow_tools_without_opening_github_or_pi() {
     assert_eq!(error.is_error, Some(true));
     client.cancel().await.unwrap();
     assert!(!settings.cache_dir.exists());
+}
+
+struct OtherRepo(Fake);
+impl GitHubApi for OtherRepo {
+    fn json(&self, path: &str) -> collector::Result<Value> {
+        assert!(
+            path.contains("repos/example/second/"),
+            "Mac used the default scope for a second-repo request: {path}"
+        );
+        let value = self
+            .0
+            .json(&path.replace("repos/example/second/", "repos/example/project/"))?;
+        Ok(serde_json::from_str(
+            &serde_json::to_string(&value)?.replace("example/project", "example/second"),
+        )?)
+    }
+    fn diff(&self, path: &str) -> collector::Result<String> {
+        self.0.diff(path)
+    }
+}
+#[tokio::test]
+async fn another_repo_keeps_capture_ids_publication_and_recall_in_its_own_scope() {
+    use rmcp::{ServiceExt, model::CallToolRequestParams, transport::TokioChildProcess};
+    let dir = tempfile::tempdir().unwrap();
+    let mut settings = settings(dir.path());
+    settings.repositories = vec![REPO.into(), "example/second".into()];
+    let (url, stop, task, db) = backend(dir.path()).await;
+    settings.endpoint = url;
+    let first = prepared(&settings, &Fake::new());
+    let api = OtherRepo(Fake::new());
+    let meta =
+        evidence::prepare(&settings, &api, "https://github.com/EXAMPLE/SECOND/pull/12").unwrap();
+    assert_eq!(meta["repository"], "example/second");
+    let revision = meta["revision"].as_str().unwrap().to_string();
+    assert_ne!(revision, first.0);
+    let ids = meta["evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| s["id"] == "review:20" || s["kind"] == "implementation" || s["kind"] == "test")
+        .map(|s| s["id"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    evidence::read(
+        &settings,
+        &ReadInput {
+            revision: revision.clone(),
+            ids: ids.clone(),
+            offset: 0,
+            kind: None,
+            path: None,
+        },
+    )
+    .unwrap();
+    let lesson = evidence::build_lessons(&settings, &revision, &[draft(ids.clone())])
+        .unwrap()
+        .remove(0);
+    assert_eq!(lesson.repository, "example/second");
+    let result = evidence::remember(
+        &settings,
+        &api,
+        RememberInput {
+            revision: revision.clone(),
+            lessons: vec![draft(ids.clone())],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["outcomes"][0]["repository"], "example/second");
+    let store = SqliteStore::open_read_only(&db).unwrap();
+    assert!(store.get(REPO, &lesson.id).unwrap().is_none());
+    assert!(store.get("example/second", &lesson.id).unwrap().is_some());
+    drop(store);
+    let path = dir.path().join("multi-mac.toml");
+    fs::write(&path,format!("repository = \"{REPO}\"\nrepositories = [\"{REPO}\", \"example/second\"]\nendpoint = \"{}\"\nwriter_token_file = {:?}\ncache_dir = {:?}",settings.endpoint,settings.writer_token_file,settings.cache_dir)).unwrap();
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_dreamer"));
+    command.arg("mac").arg("--settings").arg(path).arg("mcp");
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+    let listing = client
+        .call_tool(
+            CallToolRequestParams::new("list_repositories")
+                .with_arguments(json!({}).as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap()
+        .structured_content
+        .unwrap();
+    assert_eq!(listing["repositories"], json!([REPO, "example/second"]));
+    let recall = client
+        .call_tool(
+            CallToolRequestParams::new("recall_knowledge").with_arguments(
+                json!({"repository":"example/second","queries":["account"]})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_ne!(recall.is_error, Some(true));
+    let recall = recall.structured_content.unwrap();
+    assert_eq!(recall["repository"], "example/second");
+    assert_eq!(recall["lessons"][0]["lesson"]["id"], lesson.id);
+    let default = client
+        .call_tool(
+            CallToolRequestParams::new("recall_knowledge")
+                .with_arguments(json!({"queries":["account"]}).as_object().unwrap().clone()),
+        )
+        .await
+        .unwrap()
+        .structured_content
+        .unwrap();
+    assert_eq!(default["repository"], REPO);
+    assert!(default["lessons"].as_array().unwrap().is_empty());
+    client.cancel().await.unwrap();
+    settings.repositories = vec![REPO.into()];
+    assert!(
+        evidence::read(
+            &settings,
+            &ReadInput {
+                revision,
+                ids,
+                offset: 0,
+                kind: None,
+                path: None
+            }
+        )
+        .is_err()
+    );
+    stop.cancel();
+    tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .unwrap()
+        .unwrap();
 }

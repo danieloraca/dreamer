@@ -10,7 +10,7 @@ store source-backed lessons from the PRs it reads.
 ## Dashboard
 
 After deploying, open `http://<pi-address>:3445/` and enter the **read token**.
-Browse and search lessons, inspect applicability and follow their source evidence.
+Select a repository, search lessons and follow their source evidence.
 No extra service or frontend build is needed. [Dashboard guide](docs/dashboard.md).
 
 ## Agent memory on Mac
@@ -18,6 +18,7 @@ No extra service or frontend build is needed. [Dashboard guide](docs/dashboard.m
 Run `make install-mac`, then start a new Codex task. Codex recalls knowledge before
 coding and stores supported lessons from PRs it reads, without per-lesson approval.
 [Agent memory setup and tools](docs/agent-memory.md).
+Configure additional Gecko repos with the [repository allowlist](docs/repositories.md).
 
 ## Mac collector
 

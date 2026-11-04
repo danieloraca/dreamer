@@ -7,6 +7,9 @@ data_dir = "data"
 # This section is retained for config compatibility. Collection will run on Mac;
 # the future Pi service must not require GitHub credentials.
 repository = "geckolabs/Gecko-API"
+repositories = ["geckolabs/Gecko-API"]
+# Add further exact repository names to the list above; always include the default.
+# repositories = ["geckolabs/Gecko-API", "geckolabs/Gecko-Micro-Apps"]
 batch_size = 25
 
 [memory]

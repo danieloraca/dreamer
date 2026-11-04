@@ -91,14 +91,14 @@ class InstallerTests(unittest.TestCase):
         credentials = installer.ENV.read_text()
         self.assertEqual(installer.ENV.stat().st_mode & 0o777, 0o600)
         self.assertEqual(self.config.parent.stat().st_mode & 0o777, 0o750)
-        self.config.write_text("operator's existing config")
+        self.config.write_text("operator's existing config\nrepositories = [\"example/first\", \"example/second\"]")
         with sqlite3.connect(self.state / "knowledge.sqlite3") as database:
             database.execute("INSERT INTO observations VALUES ('keep this knowledge')")
         (self.source / "target/release/dreamer").write_text("second-binary")
         with contextlib.redirect_stdout(output):
             installer.install_service()
         self.assertEqual(installer.ENV.read_text(), credentials)
-        self.assertEqual(self.config.read_text(), "operator's existing config")
+        self.assertEqual(self.config.read_text(), "operator's existing config\nrepositories = [\"example/first\", \"example/second\"]")
         self.assertEqual(self.binary.read_text(), "second-binary")
         self.assertEqual(self.binary.with_name("dreamer.previous").read_text(), "first-binary")
         backups = list((self.root / "backups").glob("*.sqlite3"))

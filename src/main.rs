@@ -61,6 +61,9 @@ enum Command {
     },
     /// Add, retrieve and search local lessons. No network or model calls.
     Lesson {
+        /// Repository to use; defaults to github.repository and must be allowlisted.
+        #[arg(long, global = true)]
+        repository: Option<String>,
         #[command(subcommand)]
         command: LessonCommand,
     },
@@ -156,6 +159,7 @@ async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
                 serde_json::json!({
                     "data_dir": config.data_dir,
                     "repository": config.github.repository,
+                    "repositories": dreamer::repository::configured(&config.github.repository, &config.github.repositories),
                     "http": {"listen": config.http.listen.to_string(), "allowed_hosts": config.http.allowed_hosts}
                 })
             );
@@ -189,42 +193,53 @@ async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
                 store.schema_version()?
             );
         }
-        Command::Lesson { command } => match command {
-            LessonCommand::Add { file } => {
-                let lesson: Lesson = serde_json::from_str(&fs::read_to_string(file)?)?;
-                lesson.validate_candidate()?;
-                if lesson.repository != config.github.repository {
-                    return Err(
-                        "lesson repository does not match the configured repository scope".into(),
-                    );
+        Command::Lesson {
+            command,
+            repository,
+        } => {
+            let selected = dreamer::repository::select(
+                &config.github.repository,
+                &config.github.repositories,
+                repository.as_deref(),
+            )?;
+            match command {
+                LessonCommand::Add { file } => {
+                    let lesson: Lesson = serde_json::from_str(&fs::read_to_string(file)?)?;
+                    lesson.validate_candidate()?;
+                    if lesson.repository != selected {
+                        return Err(
+                            "lesson repository does not match the configured repository scope"
+                                .into(),
+                        );
+                    }
+                    fs::create_dir_all(&config.data_dir)?;
+                    let mut store = SqliteStore::open(&database)?;
+                    let outcome = match store.put_candidate(&lesson)? {
+                        WriteOutcome::Inserted => "Inserted",
+                        WriteOutcome::Unchanged => "Unchanged",
+                    };
+                    println!("{outcome} candidate {}/{}", lesson.repository, lesson.id);
                 }
-                fs::create_dir_all(&config.data_dir)?;
-                let mut store = SqliteStore::open(&database)?;
-                let outcome = match store.put_candidate(&lesson)? {
-                    WriteOutcome::Inserted => "Inserted",
-                    WriteOutcome::Unchanged => "Unchanged",
-                };
-                println!("{outcome} candidate {}/{}", lesson.repository, lesson.id);
+                LessonCommand::Get { id } => {
+                    let store = SqliteStore::open_read_only(&database)?;
+                    let lesson = store
+                        .get(&selected, &id)?
+                        .ok_or("lesson not found in this repository")?;
+                    println!("{}", serde_json::to_string_pretty(&lesson)?);
+                }
+                LessonCommand::Search { query, limit } => {
+                    let store = SqliteStore::open_read_only(&database)?;
+                    let lessons = store.search(&SearchQuery {
+                        repository: selected,
+                        text: query,
+                        limit: limit
+                            .map(|value| value as usize)
+                            .unwrap_or(config.memory.default_search_limit),
+                    })?;
+                    println!("{}", serde_json::to_string_pretty(&lessons)?);
+                }
             }
-            LessonCommand::Get { id } => {
-                let store = SqliteStore::open_read_only(&database)?;
-                let lesson = store
-                    .get(&config.github.repository, &id)?
-                    .ok_or("lesson not found in this repository")?;
-                println!("{}", serde_json::to_string_pretty(&lesson)?);
-            }
-            LessonCommand::Search { query, limit } => {
-                let store = SqliteStore::open_read_only(&database)?;
-                let lessons = store.search(&SearchQuery {
-                    repository: config.github.repository,
-                    text: query,
-                    limit: limit
-                        .map(|value| value as usize)
-                        .unwrap_or(config.memory.default_search_limit),
-                })?;
-                println!("{}", serde_json::to_string_pretty(&lessons)?);
-            }
-        },
+        }
         Command::Mcp { allow_writes } => mcp::serve_stdio(&config, allow_writes).await?,
         Command::Serve { allow_writes } => mcp::http::serve(&config, allow_writes).await?,
         Command::Ingest | Command::Consolidate => unreachable!(),

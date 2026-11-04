@@ -1,5 +1,8 @@
 # Mac-only settings. No secrets or GitHub credentials in this file.
 repository = "geckolabs/Gecko-API"
+repositories = ["geckolabs/Gecko-API"]
+# Add further exact repository names to the list above; always include the default.
+# repositories = ["geckolabs/Gecko-API", "geckolabs/Gecko-Micro-Apps"]
 endpoint = "http://192.168.0.25:3445/mcp"
 # Existing private (0600) file: DREAMER_MCP_WRITE_TOKEN=...
 writer_token_file = ".env.writer"

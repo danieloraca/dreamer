@@ -1,6 +1,6 @@
 ---
 name: dreamer-memory
-description: Recall and accumulate evidence-backed Dreamer knowledge while planning, implementing, debugging or reviewing a configured repository, currently Gecko-API. Use when asked what is already known, when working on a relevant PR, or before making related code changes.
+description: Recall and accumulate evidence-backed Dreamer knowledge while planning, implementing, debugging or reviewing the configured repository allowlist. Use when asked what is already known, when working on a relevant PR, or before making related code changes.
 ---
 
 # Dreamer memory
@@ -12,8 +12,10 @@ learn from relevant PR evidence afterwards. No individual lesson approval is nee
 
 ## Recall before coding
 
-Discover Dreamer's available tools. Prefer the Mac `recall_knowledge` tool with a
-few short component or behavior terms; otherwise use the Pi `search_lessons` and
+Discover Dreamer's available tools. Call `list_repositories` to see configured scopes;
+resolve the actual task repository from the checkout/PR and select it explicitly.
+Never combine another repository's lessons by default. Prefer the Mac `recall_knowledge` tool with a
+few short component or behavior terms and the explicit task repository; otherwise use the Pi `search_lessons` and
 `get_lesson` tools. Search the actual affected repository, then inspect applicability
 and evidence. Literal search can match exclusions; discard those matches. Use
 relevant lessons alongside current source and tests. A miss does not establish

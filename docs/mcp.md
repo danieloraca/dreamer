@@ -58,6 +58,9 @@ MCP. Keep the synthetic demo separate and SQLite on the Pi's local filesystem.
 
 ## Tool contracts
 
+`list_repositories` takes `{}` and returns the default and configured allowlist.
+See [repository configuration](repositories.md).
+
 `search_lessons` accepts `repository`, `query` and optional `limit` (1–100). It
 returns `{ "repository": "...", "lessons": [...] }`, including evidence,
 provenance, status and storage time. Matching/order are the same as the CLI.
@@ -74,7 +77,7 @@ Its argument is `{ "lesson": { ... } }`; see the complete shape in
 The batch collector produces a local preview. [Mac agent tools](agent-memory.md)
 automatically publish source-backed lessons extracted by the coding agent.
 
-All tools require the configured repository exactly. Invalid inputs, wrong scope
+Scoped tools require an allowlisted repository. Case-only aliases resolve to its configured spelling. Invalid inputs, wrong scope
 and conflicts return `isError: true` with a code/message. Unknown/disabled tools
 return JSON-RPC method-not-found errors. Producer/evidence remain assertions,
 not authenticated identity or verified facts.

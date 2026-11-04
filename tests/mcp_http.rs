@@ -159,8 +159,8 @@ async fn sdk_clients_use_read_and_write_tokens_against_the_same_endpoint() {
     let (url, shutdown, task) = start(&config, true).await;
     let reader = connect(&url, READ).await;
     let writer = connect(&url, WRITE).await;
-    assert_eq!(reader.list_all_tools().await.unwrap().len(), 2);
-    assert_eq!(writer.list_all_tools().await.unwrap().len(), 3);
+    assert_eq!(reader.list_all_tools().await.unwrap().len(), 3);
+    assert_eq!(writer.list_all_tools().await.unwrap().len(), 4);
     let lesson: Value = serde_json::from_str(FIXTURE).unwrap();
     assert!(
         reader

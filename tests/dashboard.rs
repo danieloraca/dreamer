@@ -237,7 +237,6 @@ async fn api_validates_filters_and_does_not_create_or_migrate_storage() {
         "limit=51",
         "offset=1000001",
         "status=trusted",
-        "repository=example/other",
         "limit=no",
         "q=\u{2665}".repeat(501).as_str(),
     ] {

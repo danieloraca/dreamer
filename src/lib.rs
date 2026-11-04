@@ -11,3 +11,5 @@ pub mod store;
 
 #[cfg(feature = "mac-client")]
 pub mod mac;
+
+pub mod repository;

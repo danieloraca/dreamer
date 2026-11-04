@@ -44,6 +44,7 @@ pub(super) async fn javascript() -> Response {
 #[serde(default, deny_unknown_fields)]
 pub(super) struct BrowseInput {
     q: String,
+    repository: Option<String>,
     status: Option<String>,
     limit: Option<usize>,
     offset: usize,
@@ -85,8 +86,16 @@ pub(super) async fn knowledge(
     let Ok(Query(input)) = input else {
         return StatusCode::BAD_REQUEST.into_response();
     };
+    let repository = match crate::repository::select(
+        &state.repository,
+        &state.repositories,
+        input.repository.as_deref(),
+    ) {
+        Ok(repository) => repository,
+        Err(_) => return StatusCode::FORBIDDEN.into_response(),
+    };
     let query = BrowseQuery {
-        repository: state.repository.clone(),
+        repository,
         text: input.q,
         status: input.status,
         limit: input.limit.unwrap_or(25),
@@ -95,13 +104,20 @@ pub(super) async fn knowledge(
     let Ok(permit) = state.database_slots.acquire_owned().await else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
+    let repositories = state.repositories;
+    let default_repository = state.repository;
     let result = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         SqliteStore::open_read_only(&state.database)?.browse(&query)
     })
     .await;
     let mut response = match result {
-        Ok(Ok(page)) => Json(page).into_response(),
+        Ok(Ok(page)) => {
+            let mut value = serde_json::to_value(page).expect("knowledge page serialization");
+            value["repositories"] = serde_json::json!(repositories);
+            value["default_repository"] = serde_json::json!(default_repository);
+            Json(value).into_response()
+        }
         Ok(Err(crate::store::sqlite::StoreError::Invalid(_))) => {
             StatusCode::BAD_REQUEST.into_response()
         }

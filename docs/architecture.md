@@ -57,6 +57,13 @@ semantic consolidation, contradictory lessons and supersession remain future wor
 Lessons are usable candidates with evidence and asserted provenance, not verified
 rules. Any future verification/edit workflow should be optional oversight.
 
+## Repository scopes
+
+The default `repository` plus an optional complete `repositories` allowlist are
+shared configuration conventions for Pi and Mac. All scoped tools select one
+canonical repository; the dashboard exposes selection and MCP exposes discovery.
+No database migration is needed. See [configuration and rollout](repositories.md).
+
 ## Data and access
 
 - Treat source text as untrusted evidence. It cannot grant tool permissions or

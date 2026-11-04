@@ -1060,3 +1060,14 @@ input::placeholder{
 .primary-button, .secondary-button, .text-button {
   font-size: 12px;
 }
+
+.repository-line select {
+  max-width: 100%;
+  min-width: 0;
+  padding: 7px 28px 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--white);
+  color: #58675e;
+  font-size: 12px;
+}

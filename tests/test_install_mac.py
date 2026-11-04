@@ -44,6 +44,7 @@ class MacInstallerTests(unittest.TestCase):
             self.assertEqual(binary.read_bytes(), self.binary.read_bytes())
             self.assertEqual(self.codex.stat().st_mode & 0o777, 0o600)
             custom = settings.read_text().replace('http://192.168.0.25:3445/mcp', 'http://127.0.0.1:9998/mcp')
+            custom = custom.replace('repositories = ["geckolabs/Gecko-API"]', 'repositories = ["geckolabs/Gecko-API", "example/second"]')
             settings.write_text(custom)
             installer.install(self.home, self.binary, self.writer)
         self.assertEqual(settings.read_text(), custom)
@@ -51,6 +52,18 @@ class MacInstallerTests(unittest.TestCase):
         self.assertEqual(self.agents.read_text().count(installer.START), 1)
         self.assertIn('Keep this personal instruction.', self.agents.read_text())
         self.assertEqual(self.codex.read_text().count(installer.CONFIG_START), 1)
+
+    def test_legacy_settings_gain_an_explicit_default_list_without_scope_expansion(self):
+        settings = self.home / '.config/dreamer/mac.toml'
+        settings.parent.mkdir(parents=True)
+        legacy = 'repository = "example/first"\nendpoint = "http://127.0.0.1:9988/mcp"\nwriter_token_file = "private.env"\ncache_dir = "private-cache"\n'
+        settings.write_text(legacy)
+        with patch.object(installer.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)):
+            installer.install(self.home, self.binary, self.writer)
+        result = tomllib.loads(settings.read_text())
+        self.assertEqual(result['repositories'], ['example/first'])
+        self.assertEqual(result['endpoint'], 'http://127.0.0.1:9988/mcp')
+        self.assertEqual(result['writer_token_file'], 'private.env')
 
     def test_unmanaged_mcp_is_rejected_before_installation(self):
         self.codex.write_text(self.original + '\n[mcp_servers.dreamer_mac]\ncommand = "operator-command"\n')

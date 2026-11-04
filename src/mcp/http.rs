@@ -96,6 +96,7 @@ struct HttpState {
     write: Option<McpService>,
     database: std::path::PathBuf,
     repository: String,
+    repositories: Vec<String>,
     allowed_hosts: Vec<String>,
     database_slots: Arc<tokio::sync::Semaphore>,
 }
@@ -137,6 +138,10 @@ pub fn router(
         write: writer,
         database: config.data_dir.join("knowledge.sqlite3"),
         repository: config.github.repository.clone(),
+        repositories: crate::repository::configured(
+            &config.github.repository,
+            &config.github.repositories,
+        ),
         allowed_hosts: config.http.allowed_hosts.clone(),
     };
     Ok(Router::new()

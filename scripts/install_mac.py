@@ -71,15 +71,18 @@ def install(home, binary, token_file):
         raise RuntimeError('An unmanaged dreamer-memory skill exists; nothing changed.')
     settings_text = ('# Managed by Dreamer Mac. Credentials remain in their existing private file.\n'
         + 'repository = "geckolabs/Gecko-API"\n'
+        + 'repositories = ["geckolabs/Gecko-API"]\n'
         + 'endpoint = "http://192.168.0.25:3445/mcp"\n'
         + 'writer_token_file = ' + json.dumps(str(token_file)) + '\n'
         + 'cache_dir = ' + json.dumps(str(shared / 'pr-cache')) + '\n')
     if settings.exists():
         current = tomllib.loads(settings.read_text())
         # Preserve the user's configured repository, endpoint and credential/cache paths.
-        if set(current) != {'repository', 'endpoint', 'writer_token_file', 'cache_dir'}:
+        if not {'repository', 'endpoint', 'writer_token_file', 'cache_dir'} <= set(current) or set(current) - {'repository', 'repositories', 'endpoint', 'writer_token_file', 'cache_dir'}:
             raise RuntimeError('Existing Mac settings need inspection; nothing changed.')
         settings_text = settings.read_text()
+        if 'repositories' not in current:
+            settings_text = settings_text.rstrip() + '\nrepositories = ' + json.dumps([current['repository']]) + '\n'
     table = '\n'.join([CONFIG_START, '[mcp_servers.dreamer_mac]',
         'command = ' + json.dumps(str(installed)),
         'args = ' + json.dumps(['mac', '--settings', str(settings), 'mcp']),
@@ -88,7 +91,7 @@ def install(home, binary, token_file):
     updated = replace_section(existing, CONFIG_START, CONFIG_END, table)
     tomllib.loads(updated)
     guidance = ('\n'.join([START, '## Dreamer knowledge', '',
-        'For planning, implementing, debugging or reviewing a configured Dreamer repository (currently Gecko-API), use '
+        'For planning, implementing, debugging or reviewing a configured Dreamer repository (choose from the configured allowlist), use '
         + str(skill) + '. Recall applicable knowledge before making code decisions, even when I do not ask. '
         'After reading a relevant approved/merged PR for my task, automatically save supported reusable lessons. '
         'No individual lesson approval is required. Keep scope to the repositories and PRs involved in my work; '

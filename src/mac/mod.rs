@@ -19,6 +19,8 @@ pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     pub repository: String,
+    #[serde(default)]
+    pub repositories: Vec<String>,
     pub endpoint: String,
     pub writer_token_file: PathBuf,
     pub cache_dir: PathBuf,
@@ -26,7 +28,7 @@ pub struct Settings {
 impl Settings {
     pub fn load(path: &Path) -> Result<Self> {
         let mut settings: Self = toml::from_str(&fs::read_to_string(path)?)?;
-        crate::lesson::validate_repository(&settings.repository)?;
+        crate::repository::validate(&settings.repository, &settings.repositories)?;
         let url = url::Url::parse(&settings.endpoint)?;
         if url.scheme() != "http"
             || url.host_str().is_none()
@@ -52,6 +54,16 @@ impl Settings {
             }
         }
         Ok(settings)
+    }
+    pub fn repositories(&self) -> Vec<String> {
+        crate::repository::configured(&self.repository, &self.repositories)
+    }
+    pub fn select_repository(&self, requested: Option<&str>) -> Result<String> {
+        Ok(crate::repository::select(
+            &self.repository,
+            &self.repositories,
+            requested,
+        )?)
     }
     fn cache(&self) -> Result<()> {
         if !self.cache_dir.exists() {
@@ -82,6 +94,8 @@ impl Settings {
 pub enum MacCommand {
     /// Run on-demand Mac MCP tools over stdio; no polling or model API calls.
     Mcp,
+    /// List the configured Mac repository scopes.
+    Repositories,
     /// Capture one PR and return the evidence catalogue.
     Prepare {
         #[arg(long)]
@@ -98,6 +112,8 @@ pub enum MacCommand {
     },
     /// Recall lessons using a few short task/component terms.
     Recall {
+        #[arg(long)]
+        repository: Option<String>,
         #[arg(long, required = true)]
         query: Vec<String>,
     },
@@ -117,6 +133,7 @@ pub async fn run(path: PathBuf, command: MacCommand) -> std::result::Result<(), 
             return server::serve(settings).await;
         }
         let value: Value = match command {
+            MacCommand::Repositories => serde_json::json!({"default_repository":settings.repository,"repositories":settings.repositories()}),
             MacCommand::Prepare { pr } => evidence::prepare(&settings, &GhApi, &pr)?,
             MacCommand::Read {
                 revision,
@@ -132,7 +149,7 @@ pub async fn run(path: PathBuf, command: MacCommand) -> std::result::Result<(), 
                     path: None,
                 },
             )?,
-            MacCommand::Recall { query } => remote::recall(&settings, query).await?,
+            MacCommand::Recall { query, repository } => remote::recall(&settings, repository.as_deref(), query).await?,
             MacCommand::Remember { revision, file } => {
                 let lessons: Vec<Draft> = serde_json::from_slice(&fs::read(file)?)?;
                 evidence::remember(&settings, &GhApi, RememberInput { revision, lessons }).await?

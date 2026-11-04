@@ -1,5 +1,8 @@
 # Dreamer as an agent's memory
 
+[Configure the repository allowlist](repositories.md) to use this workflow with
+additional repositories. Both Mac and Pi must allow each selected scope.
+
 Dreamer is a tool Codex uses during ordinary work: recall prior lessons before
 coding, and accumulate supported lessons after reading PR feedback and the
 resulting code. No individual lesson approval is required. The existing Codex
@@ -44,7 +47,9 @@ Ordinary Pi `make deploy` builds exclude the Mac-only client features.
 
 ## Agent workflow
 
-`recall_knowledge` accepts 1–6 short task/component terms. It queries the Pi's
+`list_repositories` discovers configured scopes. `recall_knowledge` accepts an
+explicit `repository` and 1–6 short task/component terms, with the legacy default
+when omitted. It queries the Pi's
 repository-scoped search, deduplicates results and returns at most 20 lessons with
 provenance/evidence. Refine terms when `truncated` is true or recall is too broad.
 Literal matches can include exclusions; Codex assesses actual applicability.
@@ -87,7 +92,7 @@ The same operations are available to a local script for troubleshooting:
 ~/.local/share/dreamer/dreamer-mac mac --settings ~/.config/dreamer/mac.toml prepare --pr https://github.com/owner/repository/pull/123
 ```
 
-The configured repository must match the PR. Cache directories are 0700 and files
+The PR repository must be in the configured allowlist. Cache directories are 0700 and files
 0600, with a nested `.gitignore`; keep private captures outside Git. GitHub is
 read-only. Captured source text is untrusted data, not instructions or permissions.
 

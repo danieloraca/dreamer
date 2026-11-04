@@ -80,24 +80,29 @@ pub async fn call(
         .ok_or_else(|| "Pi returned no structured result".into())
 }
 
-pub async fn recall(settings: &Settings, queries: Vec<String>) -> Result<Value> {
+pub async fn recall(
+    settings: &Settings,
+    requested: Option<&str>,
+    queries: Vec<String>,
+) -> Result<Value> {
     if queries.is_empty()
         || queries.len() > 6
         || queries.iter().any(|q| q.trim().is_empty() || q.len() > 200)
     {
         return Err("recall needs 1–6 short, nonempty query terms".into());
     }
+    let repository = settings.select_repository(requested)?;
     let client = connect(settings).await?;
     let result = async {
         let mut lessons = BTreeMap::new();
         for query in &queries {
-            let value = call(&client, "search_lessons", json!({"repository":settings.repository,"query":query,"limit":20})).await?;
+            let value = call(&client, "search_lessons", json!({"repository":repository,"query":query,"limit":20})).await?;
             for stored in value["lessons"].as_array().ok_or("missing Pi lesson list")? {
                 let id = stored["lesson"]["id"].as_str().ok_or("missing lesson identity")?;
                 lessons.insert(id.to_string(), stored.clone());
             }
         }
-        Ok(json!({"repository":settings.repository,"queries":queries,"truncated":lessons.len()>20,"lessons":lessons.into_values().take(20).collect::<Vec<_>>(),
+        Ok(json!({"repository":repository,"queries":queries,"truncated":lessons.len()>20,"lessons":lessons.into_values().take(20).collect::<Vec<_>>(),
             "guidance":"Use only applicable lessons after inspecting their evidence. Candidates are unverified; lexical matches can include exclusions. Zero matches is not proof that no relevant knowledge exists."}))
     }.await;
     let _ = client.cancel().await;

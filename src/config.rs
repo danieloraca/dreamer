@@ -1,4 +1,4 @@
-use crate::lesson::validate_repository;
+use crate::repository;
 use serde::Deserialize;
 use std::{error::Error, fs, net::SocketAddr, path::Path, path::PathBuf};
 
@@ -33,6 +33,9 @@ impl Default for HttpConfig {
 #[serde(deny_unknown_fields)]
 pub struct GithubConfig {
     pub repository: String,
+    /// Complete allowlist; omission preserves the legacy single-repository scope.
+    #[serde(default)]
+    pub repositories: Vec<String>,
     pub batch_size: usize,
 }
 
@@ -61,7 +64,7 @@ impl Config {
         if config.data_dir.as_os_str().is_empty() {
             return Err("data_dir must not be empty".into());
         }
-        validate_repository(&config.github.repository)?;
+        repository::validate(&config.github.repository, &config.github.repositories)?;
         if !(1..=100).contains(&config.github.batch_size) {
             return Err("github.batch_size must be between 1 and 100".into());
         }

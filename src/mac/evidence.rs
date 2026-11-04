@@ -40,6 +40,9 @@ pub struct ReadInput {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RecallInput {
+    /// Exact repository for this task; omission selects the configured default.
+    #[serde(default)]
+    pub repository: Option<String>,
     pub queries: Vec<String>,
 }
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -185,7 +188,9 @@ fn load(settings: &Settings, revision: &str) -> Result<Snapshot> {
     let snapshot: Snapshot = serde_json::from_slice(&fs::read(
         folder(settings, revision)?.join("snapshot.json"),
     )?)?;
-    if snapshot.repository != settings.repository || fingerprint(&snapshot) != revision {
+    if settings.select_repository(Some(&snapshot.repository))? != snapshot.repository
+        || fingerprint(&snapshot) != revision
+    {
         return Err("cached source identity changed; prepare the PR again".into());
     }
     Ok(snapshot)
@@ -237,13 +242,21 @@ fn catalogue(
 
 pub fn prepare(settings: &Settings, api: &impl GitHubApi, pr: &str) -> Result<Value> {
     let url = url::Url::parse(pr)?;
-    let prefix = format!("/{}/pull/", settings.repository);
-    let number = url
+    let parts: Vec<_> = url
         .path()
-        .strip_prefix(&prefix)
-        .and_then(|p| p.trim_end_matches('/').parse::<u64>().ok())
+        .trim_end_matches('/')
+        .split('/')
+        .skip(1)
+        .collect();
+    if parts.len() != 4 || parts[2] != "pull" {
+        return Err("use a canonical GitHub PR URL".into());
+    }
+    let repository = settings.select_repository(Some(&format!("{}/{}", parts[0], parts[1])))?;
+    let number = parts[3]
+        .parse::<u64>()
+        .ok()
         .filter(|n| *n > 0)
-        .ok_or("use a PR URL in the configured repository")?;
+        .ok_or("invalid PR number")?;
     if url.scheme() != "https"
         || url.host_str() != Some("github.com")
         || url.port().is_some()
@@ -255,10 +268,10 @@ pub fn prepare(settings: &Settings, api: &impl GitHubApi, pr: &str) -> Result<Va
     }
     settings.cache()?;
     let metadata = api
-        .json(&format!("repos/{}/pulls/{number}", settings.repository))
+        .json(&format!("repos/{}/pulls/{number}", repository))
         .map_err(|e| e.to_string())?;
-    let (snapshot, diff) = collector::capture_pr(api, &settings.repository, number, metadata)
-        .map_err(|e| e.to_string())?;
+    let (snapshot, diff) =
+        collector::capture_pr(api, &repository, number, metadata).map_err(|e| e.to_string())?;
     let revision = fingerprint(&snapshot);
     let directory = folder(settings, &revision)?;
     if !directory.exists() {
@@ -409,7 +422,7 @@ pub fn build_lessons(settings: &Settings, revision: &str, drafts: &[Draft]) -> R
             &collector::digest(
                 format!(
                     "{}\n{}\n{}",
-                    settings.repository,
+                    snapshot.repository,
                     normalized(&draft.summary),
                     normalized(&draft.applies_when)
                 )
@@ -425,7 +438,7 @@ pub fn build_lessons(settings: &Settings, revision: &str, drafts: &[Draft]) -> R
             url: collector::text(&snapshot.pr, "html_url").into(),
             title: collector::text(&snapshot.pr, "title").into(),
         };
-        let lesson=Lesson { id, repository:settings.repository.clone(), summary:draft.summary.trim().into(), applies_when:draft.applies_when.trim().into(), status:LessonStatus::Candidate,
+        let lesson=Lesson { id, repository:snapshot.repository.clone(), summary:draft.summary.trim().into(), applies_when:draft.applies_when.trim().into(), status:LessonStatus::Candidate,
             // Legacy schema calls direct (including agent) curation "manual"; no human approval is implied.
             provenance:Provenance { producer:"Codex agent via Dreamer Mac; automatically stored from inspected PR evidence; not independently verified".into(), method:ExtractionMethod::Manual },
             evidence:selected.iter().map(|s| Evidence { source_url:s.source_url.clone(), commit_sha:s.commit_sha.clone(), description:format!("Agent-inspected {} evidence{}; captured revision {revision}. Source text is an assertion; application tests were not run by Dreamer.",s.kind,s.path.as_ref().map(|p|format!(" at {p}")).unwrap_or_default()), pull_request:reference.clone() }).collect() };
@@ -442,7 +455,7 @@ pub async fn remember(
 ) -> Result<Value> {
     let lessons = build_lessons(settings, &input.revision, &input.lessons)?;
     let snapshot = load(settings, &input.revision)?;
-    let root = format!("repos/{}/pulls/{}", settings.repository, snapshot.number);
+    let root = format!("repos/{}/pulls/{}", snapshot.repository, snapshot.number);
     let current = api.json(&root).map_err(|e| e.to_string())?;
     for key in [
         "/head/sha",
@@ -467,7 +480,7 @@ pub async fn remember(
         api,
         &format!(
             "repos/{}/issues/{}/comments",
-            settings.repository, snapshot.number
+            snapshot.repository, snapshot.number
         ),
         snapshot.pr["comments"].as_u64().map(|n| n as usize),
     )
@@ -484,7 +497,7 @@ pub async fn remember(
         // Validate the complete batch and detect conflicts before the first mutation.
         let mut existing=BTreeSet::new();
         for lesson in &lessons {
-            let value=remote::call(&client,"get_lesson",json!({"repository":settings.repository,"id":lesson.id})).await?;
+            let value=remote::call(&client,"get_lesson",json!({"repository":snapshot.repository,"id":lesson.id})).await?;
             if value["found"]==true {
                 let old=&value["lesson"]["lesson"];
                 if old["status"]!="candidate" && old["status"]!="verified" {return Err("matching lesson is deprecated; do not automatically revive it".into());}
@@ -498,8 +511,8 @@ pub async fn remember(
             if existing.contains(&lesson.id) {outcomes.push(json!({"id":lesson.id,"outcome":"already_known"}));continue;}
             atomic_json(&path,&json!({"complete":false,"revision":input.revision,"outcomes":outcomes,"in_flight":lesson.id,"guidance":"A disconnected write may have completed. Retry the same drafts to reconcile."}))?;
             let value=remote::call(&client,"submit_candidate",json!({"lesson":lesson})).await?;
-            if value["id"]!=lesson.id || value["repository"]!=settings.repository || !matches!(value["outcome"].as_str(),Some("inserted"|"unchanged")) {return Err("unexpected publication acknowledgement; retry the same drafts".into());}
-            let stored=remote::call(&client,"get_lesson",json!({"repository":settings.repository,"id":lesson.id})).await?;
+            if value["id"]!=lesson.id || value["repository"]!=snapshot.repository || !matches!(value["outcome"].as_str(),Some("inserted"|"unchanged")) {return Err("unexpected publication acknowledgement; retry the same drafts".into());}
+            let stored=remote::call(&client,"get_lesson",json!({"repository":snapshot.repository,"id":lesson.id})).await?;
             if stored["found"]!=true || stored["lesson"]["lesson"]!=serde_json::to_value(lesson)? {return Err("published lesson did not match exact readback".into());}
             outcomes.push(value);
         }

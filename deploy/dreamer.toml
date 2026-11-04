@@ -4,6 +4,9 @@ data_dir = "/var/lib/dreamer"
 [github]
 # Local collection scope only; no GitHub access happens on the Pi.
 repository = "geckolabs/Gecko-API"
+repositories = ["geckolabs/Gecko-API"]
+# Add further exact repository names to the list above; always include the default.
+# repositories = ["geckolabs/Gecko-API", "geckolabs/Gecko-Micro-Apps"]
 batch_size = 25
 
 [memory]

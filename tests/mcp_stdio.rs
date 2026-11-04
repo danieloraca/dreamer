@@ -92,7 +92,15 @@ async fn sdk_client_discovers_reads_and_enforces_read_only_repository_scope() {
     let client = connect(&config, false).await;
     let tools = client.list_all_tools().await.unwrap();
     let names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
-    assert_eq!(names, ["list_repositories", "search_lessons", "get_lesson"]);
+    assert_eq!(
+        names,
+        [
+            "list_repositories",
+            "search_lessons",
+            "get_lesson",
+            "get_lesson_history"
+        ]
+    );
     for tool in tools {
         let annotations = tool.annotations.unwrap();
         assert_eq!(annotations.read_only_hint, Some(true));
@@ -288,7 +296,7 @@ async fn legacy_initialize_and_clean_eof_work_over_raw_json_rpc() {
         .await
         .unwrap();
     let tools = raw_request(&mut stdin, &mut stdout, 2, "tools/list", json!({})).await;
-    assert_eq!(tools["tools"].as_array().unwrap().len(), 3);
+    assert_eq!(tools["tools"].as_array().unwrap().len(), 4);
     let result = raw_request(&mut stdin, &mut stdout, 3, "tools/call", json!({"name": "search_lessons", "arguments": {"repository": REPOSITORY, "query": "pagination"}})).await;
     assert_eq!(
         result["structuredContent"]["lessons"]

@@ -3,6 +3,9 @@ use crate::lesson::{
     Evidence, ExtractionMethod, Lesson, LessonStatus, Provenance, PullRequestRef, StoredLesson,
     validate_repository,
 };
+use crate::lifecycle::{
+    ChangeAction, HistoryPage, HistoryQuery, LessonChange, LifecycleSummary, StoredChange,
+};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use std::{error::Error, fmt, path::Path, time::Duration};
 
@@ -22,6 +25,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 2,
         name: "lookup_indexes",
         sql: include_str!("../../migrations/0002_lookup_indexes.sql"),
+    },
+    Migration {
+        version: 3,
+        name: "lesson_lifecycle",
+        sql: include_str!("../../migrations/0003_lesson_lifecycle.sql"),
     },
 ];
 
@@ -233,7 +241,173 @@ fn read_lesson(
             evidence,
         },
         stored_at,
+        lifecycle: read_lifecycle(connection, repository, id)?,
     }))
+}
+
+fn read_lifecycle(
+    connection: &Connection,
+    repository: &str,
+    id: &str,
+) -> Result<Option<LifecycleSummary>, StoreError> {
+    let terminal: Option<(Option<String>, String)> = connection.query_row(
+        "SELECT target_id, reason FROM lesson_changes WHERE repository=?1 AND source_id=?2 AND action IN ('supersede','retire')",
+        params![repository,id], |row| Ok((row.get(0)?,row.get(1)?)),
+    ).optional()?;
+    let mut statement = connection.prepare(
+        "SELECT DISTINCT CASE WHEN c.source_id=?2 THEN c.target_id ELSE c.source_id END AS other
+         FROM lesson_changes c JOIN lessons a ON a.repository=c.repository AND a.id=c.source_id
+         JOIN lessons b ON b.repository=c.repository AND b.id=c.target_id
+         WHERE c.repository=?1 AND c.action='conflict' AND (c.source_id=?2 OR c.target_id=?2)
+         AND a.status!='deprecated' AND b.status!='deprecated' ORDER BY other LIMIT 11",
+    )?;
+    let mut conflicts = statement
+        .query_map(params![repository, id], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let conflicts_truncated = conflicts.len() > 10;
+    conflicts.truncate(10);
+    if terminal.is_none() && conflicts.is_empty() {
+        return Ok(None);
+    }
+    let (superseded_by, retirement_reason) = match terminal {
+        Some((target, reason)) => (target, Some(reason)),
+        None => (None, None),
+    };
+    Ok(Some(LifecycleSummary {
+        superseded_by,
+        retirement_reason,
+        conflicts,
+        conflicts_truncated,
+    }))
+}
+fn stored_change(
+    id: String,
+    payload: String,
+    stored_at: String,
+) -> Result<StoredChange, StoreError> {
+    let change = serde_json::from_str(&payload)
+        .map_err(|_| StoreError::Schema("invalid lifecycle payload".into()))?;
+    Ok(StoredChange {
+        id,
+        change,
+        stored_at,
+    })
+}
+impl SqliteStore {
+    /// Append evidence and project a terminal status in one write transaction.
+    pub fn change_lesson(
+        &mut self,
+        proposed: &LessonChange,
+    ) -> Result<(WriteOutcome, StoredChange), StoreError> {
+        proposed.validate().map_err(StoreError::Invalid)?;
+        let change = proposed.canonical();
+        let id = change.id();
+        let payload = serde_json::to_string(&change).expect("change serialization");
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<(String, String)> = tx
+            .query_row(
+                "SELECT payload,stored_at FROM lesson_changes WHERE repository=?1 AND id=?2",
+                params![change.repository, id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((old, time)) = existing {
+            if old != payload {
+                return Err(StoreError::Conflict("lifecycle identity conflict".into()));
+            }
+            return Ok((WriteOutcome::Unchanged, stored_change(id, old, time)?));
+        }
+        let source = read_lesson(&tx, &change.repository, &change.source_id)?
+            .ok_or(StoreError::Invalid("source lesson not found in repository"))?;
+        if source.lesson.status == LessonStatus::Deprecated {
+            return Err(StoreError::Conflict(
+                "source lesson is already retired or superseded; inspect its history".into(),
+            ));
+        }
+        if let Some(target) = &change.target_id {
+            let target = read_lesson(&tx, &change.repository, target)?
+                .ok_or(StoreError::Invalid("target lesson not found in repository"))?;
+            if target.lesson.status == LessonStatus::Deprecated {
+                return Err(StoreError::Conflict(
+                    "target lesson is retired or superseded; select its active successor".into(),
+                ));
+            }
+        }
+        tx.execute("INSERT INTO lesson_changes (repository,id,source_id,action,target_id,reason,payload) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![change.repository,id,change.source_id,change.action.as_str(),change.target_id,change.reason,payload])?;
+        if change.action != ChangeAction::Conflict {
+            tx.execute(
+                "UPDATE lessons SET status='deprecated' WHERE repository=?1 AND id=?2",
+                params![change.repository, change.source_id],
+            )?;
+        }
+        let time = tx.query_row(
+            "SELECT stored_at FROM lesson_changes WHERE repository=?1 AND id=?2",
+            params![change.repository, id],
+            |row| row.get(0),
+        )?;
+        tx.commit()?;
+        Ok((
+            WriteOutcome::Inserted,
+            StoredChange {
+                id,
+                change,
+                stored_at: time,
+            },
+        ))
+    }
+    pub fn lesson_history(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
+        validate_repository(&query.repository).map_err(StoreError::Invalid)?;
+        if query.id.trim().is_empty()
+            || query.id.len() > 1000
+            || !(1..=50).contains(&query.limit)
+            || query.offset > 1_000_000
+            || query.change_id.as_ref().is_some_and(|id| id.len() > 100)
+        {
+            return Err(StoreError::Invalid(
+                "invalid history identity or pagination",
+            ));
+        }
+        let mut statement=self.connection.prepare(
+            "SELECT id,payload,stored_at FROM lesson_changes WHERE repository=?1 AND (source_id=?2 OR target_id=?2)
+             AND (?3 IS NULL OR id=?3) ORDER BY stored_at DESC,id ASC LIMIT ?4 OFFSET ?5")?;
+        let rows = statement
+            .query_map(
+                params![
+                    query.repository,
+                    query.id,
+                    query.change_id,
+                    (query.limit + 1) as i64,
+                    query.offset as i64
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        let next_offset = if rows.len() > query.limit {
+            Some(query.offset + query.limit)
+        } else {
+            None
+        };
+        let changes = rows
+            .into_iter()
+            .take(query.limit)
+            .map(|(id, payload, time)| stored_change(id, payload, time))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(HistoryPage {
+            repository: query.repository.clone(),
+            id: query.id.clone(),
+            changes,
+            next_offset,
+        })
+    }
 }
 
 impl SqliteStore {
@@ -372,7 +546,10 @@ impl LessonStore for SqliteStore {
         if id.trim().is_empty() {
             return Err(StoreError::Invalid("lesson ID must not be empty"));
         }
-        read_lesson(&self.connection, repository, id)
+        let tx = self.connection.unchecked_transaction()?;
+        let lesson = read_lesson(&tx, repository, id)?;
+        tx.commit()?;
+        Ok(lesson)
     }
 
     fn search(&self, query: &SearchQuery) -> Result<Vec<StoredLesson>, Self::Error> {
@@ -382,8 +559,11 @@ impl LessonStore for SqliteStore {
                 "search needs nonempty text and a limit between 1 and 100",
             ));
         }
+        // Status, evidence and lifecycle belong to the same read snapshot while
+        // concurrent agents can retire or supersede a lesson.
+        let tx = self.connection.unchecked_transaction()?;
         // Literal substring matching: %, _ and quotes are data, not SQL syntax.
-        let mut statement = self.connection.prepare(
+        let mut statement = tx.prepare(
             "SELECT id FROM lessons WHERE repository = ?1 AND status != 'deprecated'
              AND instr(lower(summary || ' ' || applies_when), lower(?2)) > 0
              ORDER BY stored_at DESC, id ASC LIMIT ?3",
@@ -394,12 +574,16 @@ impl LessonStore for SqliteStore {
                 |row| row.get::<_, String>(0),
             )?
             .collect::<Result<Vec<_>, _>>()?;
-        ids.into_iter()
+        let lessons = ids
+            .into_iter()
             .map(|id| {
-                read_lesson(&self.connection, &query.repository, &id)?
+                read_lesson(&tx, &query.repository, &id)?
                     .ok_or_else(|| StoreError::Schema("lesson disappeared during search".into()))
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+        tx.commit()?;
+        Ok(lessons)
     }
 }
 

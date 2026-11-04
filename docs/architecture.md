@@ -40,7 +40,8 @@ Agents on Mac or elsewhere ← MCP read tools ← Pi HTTP service (or stdio/SSH)
 
 Validation checks completeness, repository syntax and 40-character commit SHAs.
 It does not fetch/verify sources, prove a lesson's truth, authenticate producers
-or approve a lesson. There is no status-transition or edit API. A candidate
+or approve a lesson. Evidence-backed lifecycle events can retire/supersede lessons or flag conflicts;
+there is no content-overwrite or delete API. A candidate
 must not be treated as an instruction or as a verified rule.
 
 ## Agent memory loop
@@ -53,7 +54,9 @@ no per-lesson human approval gate. See [agent memory](agent-memory.md).
 
 The Pi remains the store and read/write MCP boundary. No GitHub/model credentials,
 watcher or extraction job run there. Exact normalized content is deduplicated;
-semantic consolidation, contradictory lessons and supersession remain future work.
+agents can now consolidate duplicates by superseding them, retire outdated advice
+and flag contradictions with immutable lifecycle evidence. Unattended semantic
+scanning remains future work; see [lesson lifecycle](lifecycle.md).
 Lessons are usable candidates with evidence and asserted provenance, not verified
 rules. Any future verification/edit workflow should be optional oversight.
 

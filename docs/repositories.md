@@ -70,7 +70,7 @@ Both MCP servers expose read-only `list_repositories` discovery. The Pi returns
 its allowlist; the Mac returns its own. When they differ, update configuration
 rather than assuming the broader list applies on both hosts.
 
-- Pi `search_lessons`, `get_lesson` and `submit_candidate` validate the requested
+- Pi read, history, candidate and lifecycle tools validate the requested
   repository against the service's allowlist. A denied scope is never read/written.
 - Mac `recall_knowledge` accepts `repository` plus `queries`. Omission preserves the
   configured default, but agent guidance selects the actual task scope explicitly.

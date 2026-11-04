@@ -58,8 +58,8 @@ Every MCP and health request requires `Authorization: Bearer <token>`:
 
 | Environment variable | Access |
 | --- | --- |
-| `DREAMER_MCP_TOKEN` | Search/get only |
-| `DREAMER_MCP_WRITE_TOKEN` | Search/get plus candidate submission |
+| `DREAMER_MCP_TOKEN` | Search/get and lifecycle history |
+| `DREAMER_MCP_WRITE_TOKEN` | Reads, candidate submission and evidence-backed lifecycle changes |
 
 Read the credentials locally with `sudoedit /etc/dreamer/dreamer.env` and transfer
 only the required token to each client through its private configuration. Do not
@@ -109,3 +109,15 @@ cargo check --locked --no-default-features --target aarch64-unknown-linux-gnu
 
 That does not link a Linux executable. Build the default bundled SQLite version
 natively on the Pi, as `make install-service` does.
+
+
+## Lesson lifecycle upgrade
+
+[Lifecycle tools](lifecycle.md) require schema 3 and the new Pi API. After pulling
+the update, `make deploy` backs up the existing database before migration. It
+preserves configuration, both tokens and original lesson/evidence records. Older
+binaries cannot read schema 3; a rollback requires the matching pre-upgrade binary
+and consistent backup, not just `dreamer.previous`. Keep the newer DB separately
+and stop the service before restoring. The Mac can still recall from an older Pi,
+but reconciliation reports that deployment is required. Scheduled backup/restore
+automation is a later milestone in the [master plan](master-plan.md).

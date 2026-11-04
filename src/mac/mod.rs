@@ -1,5 +1,6 @@
 //! Agent-driven Mac learning. GitHub stays on the Mac; SQLite stays behind Pi MCP.
 pub mod evidence;
+pub mod reconciliation;
 mod remote;
 mod server;
 
@@ -128,6 +129,13 @@ pub enum MacCommand {
         #[arg(long)]
         id: String,
     },
+    /// Reconcile sourced existing lessons; omit file to resume a saved pending batch.
+    Reconcile {
+        #[arg(long)]
+        revision: String,
+        #[arg(long)]
+        file: Option<PathBuf>,
+    },
     /// Automatically publish an agent-curated, source-validated batch.
     Remember {
         #[arg(long)]
@@ -168,6 +176,10 @@ pub async fn run(path: PathBuf, command: MacCommand) -> std::result::Result<(), 
             )?,
             MacCommand::Recall { query, repository, limit } => remote::recall(&settings, repository.as_deref(), query, limit).await?,
             MacCommand::Get { repository, id } => remote::get(&settings, repository.as_deref(), &id).await?,
+            MacCommand::Reconcile { revision, file } => {
+                let changes=match file {Some(file)=>serde_json::from_slice(&fs::read(file)?)?,None=>Vec::new()};
+                reconciliation::reconcile(&settings,&GhApi,reconciliation::ReconcileInput {revision,changes}).await?
+            }
             MacCommand::Remember { revision, file, skip_reason } => {
                 let lessons: Vec<Draft> = match file {
                     Some(file) => serde_json::from_slice(&fs::read(file)?)?,

@@ -3,6 +3,7 @@ use dreamer::{
     collector::{self, CollectOptions, github::GhApi},
     config::Config,
     lesson::Lesson,
+    lifecycle::{HistoryQuery, LessonChange},
     mcp,
     store::{LessonStore, SearchQuery, WriteOutcome, sqlite::SqliteStore},
 };
@@ -69,7 +70,7 @@ enum Command {
     },
     /// Reserved: GitHub ingestion (not implemented; future Mac component).
     Ingest,
-    /// Reserved: propose lessons using a model (not implemented).
+    /// Reserved: unattended consolidation (not implemented).
     Consolidate,
     /// Serve MCP over stdio. Requires an existing, current database.
     Mcp {
@@ -93,6 +94,20 @@ enum DbCommand {
 
 #[derive(Subcommand)]
 enum LessonCommand {
+    /// Append a source-backed supersede, retire or conflict event to an existing database.
+    Change {
+        #[arg(long)]
+        file: PathBuf,
+    },
+    /// Read immutable lifecycle history, including incoming replacements.
+    History {
+        #[arg(long)]
+        id: String,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+    },
     /// Import a candidate JSON file for the configured repository; identical retries are no-ops.
     Add {
         #[arg(long)]
@@ -179,7 +194,9 @@ async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
             println!(
                 "GitHub collection: manual dry-run with collect; automatic ingestion: not implemented"
             );
-            println!("Consolidation: not implemented");
+            println!(
+                "Consolidation: evidence-backed lifecycle tools; unattended scanning is not implemented"
+            );
             println!("MCP: stdio (read-only by default); authenticated HTTP with serve");
         }
         Command::Db {
@@ -203,6 +220,32 @@ async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
                 repository.as_deref(),
             )?;
             match command {
+                LessonCommand::Change { file } => {
+                    let change: LessonChange = serde_json::from_slice(&fs::read(file)?)?;
+                    change.validate()?;
+                    if change.repository != selected {
+                        return Err("change repository does not match selected scope".into());
+                    }
+                    let (outcome, record) =
+                        SqliteStore::open_existing(&database)?.change_lesson(&change)?;
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(
+                            &serde_json::json!({"outcome":match outcome {WriteOutcome::Inserted=>"applied",WriteOutcome::Unchanged=>"unchanged"},"record":record})
+                        )?
+                    );
+                }
+                LessonCommand::History { id, limit, offset } => {
+                    let page =
+                        SqliteStore::open_read_only(&database)?.lesson_history(&HistoryQuery {
+                            repository: selected,
+                            id,
+                            change_id: None,
+                            limit,
+                            offset,
+                        })?;
+                    println!("{}", serde_json::to_string_pretty(&page)?);
+                }
                 LessonCommand::Add { file } => {
                     let lesson: Lesson = serde_json::from_str(&fs::read_to_string(file)?)?;
                     lesson.validate_candidate()?;

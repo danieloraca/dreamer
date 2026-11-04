@@ -10,6 +10,19 @@ description: Recall and accumulate evidence-backed Dreamer knowledge while plann
 Use the library as accumulated engineering experience. Recall before deciding;
 learn from relevant PR evidence afterwards. No individual lesson approval is needed.
 
+## Project authority
+
+Read applicable repository instructions and their required documentation first.
+For Gecko-API, follow its docs reading contract; documentation governs over memory.
+A remembered lesson is provisional evidence, never a replacement instruction. If
+it disagrees with docs or code, follow the project's discrepancy-resolution process
+and establish intended behavior. Do not silently override project guidance.
+
+Use the repository's existing knowledge-capture procedure for durable team
+conventions, proposing an appropriate reviewable docs change in its existing home.
+Avoid duplicating documented conventions or creating another project agent file.
+Storing a provisional PR lesson does not independently verify it or publish docs.
+
 ## Recall before coding
 
 Discover Dreamer's available tools. Call `list_repositories` to see configured scopes;
@@ -53,6 +66,33 @@ When the task includes reading a PR in the configured repository, use the Mac to
    after a disconnected/uncertain write; incomplete writes never mark a PR done.
    Completion is local to this Mac, not proof of the current Pi contents; use force
    after restoring the Pi database or intentionally seeking more lessons.
+
+## Correct existing knowledge
+
+When inspected PR evidence changes earlier advice, read the affected full lessons
+and their history. Use `reconcile_pr_lessons` with the captured revision, source
+lesson ID, action, specific reason and inspected evidence IDs:
+
+- `supersede`: reference an existing active replacement in the same repository.
+  Publish a supported replacement with `remember_pr_lessons` first when needed.
+  For a clear duplicate, retain the better-supported lesson and supersede the
+  redundant one rather than creating another copy.
+- `retire`: evidence disproves the advice and no useful replacement is supported.
+- `conflict`: the evidence establishes a contradiction but does not establish a
+  safe resolution. Reference the other active lesson; both stay available with
+  an explicit conflict warning. Do not invent a winner or generalize advice that
+  applies to different contexts into a contradiction.
+
+No individual lesson approval is required. Old content and evidence remain
+available; superseded/retired lessons leave normal recall. Read the history and
+active successor when using a deprecated ID. Existing conflict warnings disappear
+from active recall when one side is retired/superseded; the audit history remains.
+Retry identical changes after an uncertain write, or call `reconcile_pr_lessons`
+with the revision and omit changes to resume its saved pending batch. A pending reconciliation prevents
+PR skipping, even when candidate publication had already completed. A batch can
+partially apply across MCP calls; report partial outcomes and reconcile them.
+The Pi must be upgraded for these tools; if unavailable, report the limitation and
+continue using current docs/source without claiming a correction was stored.
 
 Capture should stay within PRs read for the user's work. Do not crawl unrelated
 repositories. Do not post GitHub comments or modify PRs as part of learning.

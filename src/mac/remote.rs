@@ -188,7 +188,7 @@ fn compact_recall(
         b_matches.cmp(a_matches).then_with(|| a_id.cmp(b_id))
     });
     let mut reply = json!({"repository":repository,"queries":queries,"matched_count":total,"search_limited":search_limited,"truncated":total>limit || search_limited,"lessons":[],
-        "guidance":"Compact lexical matches, not confidence scores. Fetch get_knowledge for selected IDs before applying; inspect full applicability and evidence. Shortened text can omit exclusions. Zero matches does not establish absence of knowledge."});
+        "guidance":"Compact lexical matches, not confidence scores. Fetch get_knowledge for selected IDs before applying; inspect conflict history; inspect full applicability and evidence. Shortened text can omit exclusions. Zero matches does not establish absence of knowledge."});
     for (id, (stored, matches)) in ranked.into_iter().take(limit) {
         let lesson = &stored["lesson"];
         let (summary, summary_shortened) = shortened(
@@ -206,7 +206,14 @@ fn compact_recall(
             .iter()
             .filter_map(|e| e["pull_request"]["number"].as_u64())
             .collect();
-        let preview = json!({"lesson":{"id":id,"summary":summary,"applies_when":applies_when,"status":lesson["status"]},"matching_queries":matches,"evidence_count":evidence.len(),"source_prs":prs.into_iter().take(4).collect::<Vec<_>>(),"shortened":{"summary":summary_shortened,"applies_when":applicability_shortened},"needs_details":true});
+        let lifecycle = stored.get("lifecycle").map(|state| {
+            json!({
+                "conflict_count":state["conflicts"].as_array().map_or(0,Vec::len),
+                "conflicts_truncated":state["conflicts_truncated"],
+                "has_successor":state.get("superseded_by").is_some(),
+            })
+        });
+        let preview = json!({"lesson":{"id":id,"summary":summary,"applies_when":applies_when,"status":lesson["status"]},"lifecycle":lifecycle,"matching_queries":matches,"evidence_count":evidence.len(),"source_prs":prs.into_iter().take(4).collect::<Vec<_>>(),"shortened":{"summary":summary_shortened,"applies_when":applicability_shortened},"needs_details":true});
         reply["lessons"].as_array_mut().unwrap().push(preview);
         if serde_json::to_vec(&reply)?.len() > 12_000 {
             reply["lessons"].as_array_mut().unwrap().pop();

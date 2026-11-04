@@ -47,6 +47,10 @@ Ordinary Pi `make deploy` builds exclude the Mac-only client features.
 
 ## Agent workflow
 
+Read repository instructions and required docs before recall. Project guidance
+governs over remembered advice; use its discrepancy-resolution and knowledge-capture
+procedures. Dreamer supplies provisional evidence, not competing instructions.
+
 `list_repositories` discovers configured scopes. `recall_knowledge` accepts an
 explicit `repository` and 1–6 short task/component terms, with the legacy default
 when omitted. It queries the Pi's
@@ -131,7 +135,11 @@ patches, pairing inline reviews with the same final path. They cannot prove that
 Codex interpreted the code correctly or executed its tests. Capture and publication
 are not a transaction across GitHub and the Pi. Exact normalized content is
 collapsed; semantic duplicates/revisions and conflicting lessons still need agent
-judgment, with no automatic edit, deletion or supersession API in this version.
+judgment. [Lifecycle tools](lifecycle.md) now support evidence-backed supersession,
+retirement and explicit conflicts without overwriting original content. Use Mac
+`reconcile_pr_lessons` after inspecting source/target lessons and captured PR proof;
+its pending journal prevents PR skipping after interrupted correction work.
+Omit changes to resume saved drafts. No content-edit or delete API is exposed.
 
 The existing Pi HTTP endpoint is private LAN/Tailscale HTTP. This Mac client version
 uses that HTTP endpoint; keep it private. Agent-tool use depends on the client

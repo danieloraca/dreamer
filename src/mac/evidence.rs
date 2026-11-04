@@ -214,7 +214,7 @@ fn load(settings: &Settings, revision: &str) -> Result<Snapshot> {
     }
     Ok(snapshot)
 }
-fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
+pub(super) fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
     let temporary = path.with_extension(format!(
         "tmp-{}-{}",
         std::process::id(),
@@ -292,6 +292,53 @@ fn probe_digest(
     }
     Ok(source_digest(metadata, &reviews, &comments, &discussion))
 }
+pub(super) fn check_current(
+    settings: &Settings,
+    api: &impl GitHubApi,
+    revision: &str,
+) -> Result<Snapshot> {
+    let snapshot = load(settings, revision)?;
+    if !can_learn(&snapshot.pr, &snapshot.reviews) {
+        return Err("learn after PR merge or approval at this head".into());
+    }
+    let current = api
+        .json(&format!(
+            "repos/{}/pulls/{}",
+            snapshot.repository, snapshot.number
+        ))
+        .map_err(|e| e.to_string())?;
+    if pr_identity(&current) != pr_identity(&snapshot.pr)
+        || probe_digest(api, &snapshot.repository, snapshot.number, &current)?
+            != snapshot_digest(&snapshot)
+    {
+        return Err("PR or review evidence changed; prepare it again before learning".into());
+    }
+    Ok(snapshot)
+}
+pub(super) fn reconciliation_path(
+    settings: &Settings,
+    revision: &str,
+) -> Result<std::path::PathBuf> {
+    Ok(folder(settings, revision)?.join("reconciliation.json"))
+}
+pub(super) fn finish_reconciliation(
+    settings: &Settings,
+    snapshot: &Snapshot,
+    revision: &str,
+) -> Result<bool> {
+    let path = folder(settings, revision)?.join("publication.json");
+    if !path.exists() {
+        atomic_json(
+            &path,
+            &json!({"complete":true,"revision":revision,"outcomes":[],"skip_reason":"Completed source-backed reconciliation of existing knowledge; no new candidate batch was submitted."}),
+        )?;
+    }
+    let complete = has_complete_receipt(settings, revision);
+    if complete {
+        index_completion(settings, snapshot, revision)?;
+    }
+    Ok(complete)
+}
 fn completion_path(settings: &Settings, repository: &str, number: u64) -> std::path::PathBuf {
     settings.cache_dir.join("completed").join(format!(
         "{}.json",
@@ -299,6 +346,19 @@ fn completion_path(settings: &Settings, repository: &str, number: u64) -> std::p
     ))
 }
 fn has_complete_receipt(settings: &Settings, revision: &str) -> bool {
+    let Ok(path) = reconciliation_path(settings, revision) else {
+        return false;
+    };
+    if path.exists() {
+        let pending = fs::read(path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+        if !pending
+            .is_some_and(|journal| journal["complete"] == true && journal["revision"] == revision)
+        {
+            return false;
+        }
+    }
     let Ok(directory) = folder(settings, revision) else {
         return false;
     };
@@ -462,7 +522,15 @@ pub fn prepare_with_force(
         index_completion(settings, &snapshot, &revision)?;
         return Ok(already_processed(&snapshot, &revision));
     }
-    Ok(catalogue(&snapshot, &revision, 0, None, None))
+    let mut value = catalogue(&snapshot, &revision, 0, None, None);
+    if let Some(pending) = fs::read(reconciliation_path(settings, &revision)?)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .filter(|journal| journal["complete"] == false)
+    {
+        value["pending_reconciliation"] = json!({"draft_count":pending["drafts"].as_array().map(Vec::len),"guidance":"Resume the saved batch with reconcile_pr_lessons and this revision, omitting changes. Do not silently skip unfinished corrections."});
+    }
+    Ok(value)
 }
 
 pub fn read(settings: &Settings, input: &ReadInput) -> Result<Value> {
@@ -659,18 +727,7 @@ pub async fn remember(
         }
         build_lessons(settings, &input.revision, &input.lessons)?
     };
-    let current = api
-        .json(&format!(
-            "repos/{}/pulls/{}",
-            snapshot.repository, snapshot.number
-        ))
-        .map_err(|e| e.to_string())?;
-    if pr_identity(&current) != pr_identity(&snapshot.pr)
-        || probe_digest(api, &snapshot.repository, snapshot.number, &current)?
-            != snapshot_digest(&snapshot)
-    {
-        return Err("PR or review evidence changed; prepare it again before learning".into());
-    }
+    check_current(settings, api, &input.revision)?;
     if lessons.is_empty() {
         let value = json!({"complete":true,"revision":input.revision,"outcomes":[],"skip_reason":input.skip_reason.as_deref().unwrap().trim(),"manual_approval_required":false});
         atomic_json(

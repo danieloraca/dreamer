@@ -42,7 +42,7 @@ fn local_fixture_can_be_added_searched_and_retrieved_across_cli_processes() {
     let (directory, config) = setup();
     success(run(&config, &["status"]));
     assert!(!directory.path().join("data").exists());
-    assert!(success(run(&config, &["db", "init"])).contains("schema 2"));
+    assert!(success(run(&config, &["db", "init"])).contains("schema 3"));
     assert!(
         success(run(&config, &["lesson", "add", "--file", FIXTURE])).contains("Inserted candidate")
     );
@@ -114,4 +114,61 @@ fn reading_a_missing_database_does_not_create_it() {
         assert_eq!(run(&config, &arguments).status.code(), Some(1));
         assert!(!directory.path().join("data").exists());
     }
+}
+
+#[test]
+fn lifecycle_cli_retires_without_losing_evidence_and_replays_the_same_receipt() {
+    use dreamer::{
+        lesson::Lesson,
+        lifecycle::{ChangeAction, LessonChange},
+    };
+    let (directory, config) = setup();
+    let source: Lesson =
+        serde_json::from_str(include_str!("../fixtures/sample-lesson.json")).unwrap();
+    success(run(&config, &["lesson", "add", "--file", FIXTURE]));
+    let change = LessonChange {
+        repository: source.repository,
+        source_id: source.id.clone(),
+        action: ChangeAction::Retire,
+        target_id: None,
+        reason: "Synthetic follow-up evidence invalidates the earlier overly broad advice.".into(),
+        producer: "fixture".into(),
+        evidence: source.evidence.clone(),
+    };
+    let file = directory.path().join("change.json");
+    fs::write(&file, serde_json::to_vec(&change).unwrap()).unwrap();
+    for outcome in ["applied", "unchanged"] {
+        let result: Value = serde_json::from_str(&success(run(
+            &config,
+            &["lesson", "change", "--file", file.to_str().unwrap()],
+        )))
+        .unwrap();
+        assert_eq!(result["outcome"], outcome);
+    }
+    let history: Value = serde_json::from_str(&success(run(
+        &config,
+        &["lesson", "history", "--id", &source.id],
+    )))
+    .unwrap();
+    assert_eq!(history["changes"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        history["changes"][0]["change"],
+        serde_json::to_value(&change).unwrap()
+    );
+    let original: Value = serde_json::from_str(&success(run(
+        &config,
+        &["lesson", "get", "--id", &source.id],
+    )))
+    .unwrap();
+    assert_eq!(original["lesson"]["status"], "deprecated");
+    assert_eq!(
+        original["lesson"]["evidence"],
+        serde_json::to_value(source.evidence).unwrap()
+    );
+    let matches: Value = serde_json::from_str(&success(run(
+        &config,
+        &["lesson", "search", "--query", "pagination"],
+    )))
+    .unwrap();
+    assert!(matches.as_array().unwrap().is_empty());
 }

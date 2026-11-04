@@ -60,6 +60,8 @@ pub struct StoredLesson {
     pub lesson: Lesson,
     /// UTC timestamp assigned by SQLite, independent of producer claims.
     pub stored_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<crate::lifecycle::LifecycleSummary>,
 }
 
 pub fn validate_repository(repository: &str) -> Result<(), &'static str> {

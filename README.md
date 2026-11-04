@@ -65,6 +65,11 @@ cargo clippy --locked --all-targets -- -D warnings
 
 ## Documentation
 
+- [CI checks and local equivalents](docs/ci.md)
+
+- [Master plan and milestone status](docs/master-plan.md)
+- [Correcting and consolidating lessons](docs/lifecycle.md)
+
 - [MCP tools and client configuration](docs/mcp.md)
 - [Pi installation and operation](docs/pi.md)
 - [Architecture and roadmap](docs/architecture.md)

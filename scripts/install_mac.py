@@ -92,7 +92,7 @@ def install(home, binary, token_file):
     tomllib.loads(updated)
     guidance = ('\n'.join([START, '## Dreamer knowledge', '',
         'For planning, implementing, debugging or reviewing a configured Dreamer repository (choose from the configured allowlist), use '
-        + str(skill) + '. Recall applicable knowledge before making code decisions, even when I do not ask. '
+        + str(skill) + '. Read applicable repository instructions and required docs first, then recall knowledge before making code decisions, even when I do not ask. Project guidance governs over memory. '
         'After reading a relevant approved/merged PR for my task, automatically save supported reusable lessons. '
         'No individual lesson approval is required. Keep scope to the repositories and PRs involved in my work; '
         'do not crawl unrelated sources or modify GitHub as part of learning. If memory is unavailable, say so and continue with current source and tests.', END]))

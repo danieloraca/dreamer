@@ -437,7 +437,7 @@ async fn mac_stdio_exposes_workflow_tools_without_opening_github_or_pi() {
     command.arg("mac").arg("--settings").arg(path).arg("mcp");
     let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 6);
+    assert_eq!(tools.len(), 7);
     let error = client
         .call_tool(
             CallToolRequestParams::new("recall_knowledge")
@@ -540,6 +540,22 @@ async fn another_repo_keeps_capture_ids_publication_and_recall_in_its_own_scope(
     assert!(store.get(REPO, &lesson.id).unwrap().is_none());
     assert!(store.get("example/second", &lesson.id).unwrap().is_some());
     drop(store);
+    let mut writer = SqliteStore::open_existing(&db).unwrap();
+    let mut conflicting = lesson.clone();
+    conflicting.id = "zz-conflicting-claim".into();
+    writer.put_candidate(&conflicting).unwrap();
+    writer
+        .change_lesson(&dreamer::lifecycle::LessonChange {
+            repository: "example/second".into(),
+            source_id: lesson.id.clone(),
+            target_id: Some(conflicting.id),
+            action: dreamer::lifecycle::ChangeAction::Conflict,
+            reason: "The two inspected claims disagree for this same account scope.".into(),
+            producer: "fixture".into(),
+            evidence: lesson.evidence.clone(),
+        })
+        .unwrap();
+    drop(writer);
     let path = dir.path().join("multi-mac.toml");
     fs::write(&path,format!("repository = \"{REPO}\"\nrepositories = [\"{REPO}\", \"example/second\"]\nendpoint = \"{}\"\nwriter_token_file = {:?}\ncache_dir = {:?}",settings.endpoint,settings.writer_token_file,settings.cache_dir)).unwrap();
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_dreamer"));
@@ -570,6 +586,7 @@ async fn another_repo_keeps_capture_ids_publication_and_recall_in_its_own_scope(
     let recall = recall.structured_content.unwrap();
     assert_eq!(recall["repository"], "example/second");
     assert_eq!(recall["lessons"][0]["lesson"]["id"], lesson.id);
+    assert_eq!(recall["lessons"][0]["lifecycle"]["conflict_count"], 1);
     assert!(recall["lessons"][0]["lesson"].get("evidence").is_none());
     assert_eq!(
         recall["lessons"][0]["evidence_count"],
@@ -587,8 +604,13 @@ async fn another_repo_keeps_capture_ids_publication_and_recall_in_its_own_scope(
         .await
         .unwrap();
     assert_ne!(full.is_error, Some(true));
+    let full = full.structured_content.unwrap();
     assert_eq!(
-        full.structured_content.unwrap()["lesson"]["lesson"],
+        full["history"]["changes"][0]["change"]["action"],
+        "conflict"
+    );
+    assert_eq!(
+        full["lesson"]["lesson"],
         serde_json::to_value(&lesson).unwrap()
     );
     let missing = client
@@ -818,4 +840,170 @@ async fn partial_receipt_never_skips_and_exact_legacy_completion_is_reindexed() 
     .unwrap();
     assert_eq!(reopened["already_processed"], false);
     assert_eq!(reopened["can_learn"], false);
+}
+
+fn reconcile_input(revision: &str, ids: &[String]) -> dreamer::mac::reconciliation::ReconcileInput {
+    use dreamer::{
+        lifecycle::ChangeAction,
+        mac::reconciliation::{ChangeDraft, ReconcileInput},
+    };
+    ReconcileInput {revision:revision.into(),changes:vec![
+        ChangeDraft {source_id:"earlier".into(),action:ChangeAction::Supersede,target_id:Some("retained".into()),reason:"The inspected review and resulting account-scoped query replace the earlier advice.".into(),evidence_ids:ids.into()},
+        ChangeDraft {source_id:"unsupported".into(),action:ChangeAction::Retire,target_id:None,reason:"The reviewed final implementation disproves the overly broad earlier assertion.".into(),evidence_ids:ids.into()},
+    ]}
+}
+#[tokio::test]
+async fn mac_reconciliation_resumes_partial_changes_and_never_hides_pending_work() {
+    use dreamer::{lifecycle::HistoryQuery, mac::reconciliation::reconcile};
+    let dir = tempfile::tempdir().unwrap();
+    let mut settings = settings(dir.path());
+    let (url, stop, task, db) = backend(dir.path()).await;
+    settings.endpoint = url;
+    let mut api = Fake::new();
+    let (revision, ids) = prepared(&settings, &api);
+    assert!(
+        reconcile(&settings, &api, reconcile_input(&revision, &ids))
+            .await
+            .is_err()
+    ); // No inspected sources.
+    evidence::read(
+        &settings,
+        &ReadInput {
+            revision: revision.clone(),
+            ids: ids.clone(),
+            offset: 0,
+            kind: None,
+            path: None,
+        },
+    )
+    .unwrap();
+    let seed = evidence::build_lessons(&settings, &revision, &[draft(ids.clone())])
+        .unwrap()
+        .remove(0);
+    let mut store = SqliteStore::open_existing(&db).unwrap();
+    for id in ["earlier", "unsupported", "retained"] {
+        let mut seed = seed.clone();
+        seed.id = id.into();
+        store.put_candidate(&seed).unwrap();
+    }
+    drop(store);
+    evidence::remember(&settings,&api,RememberInput {revision:revision.clone(),lessons:vec![],skip_reason:Some("Existing knowledge covers this PR; reconcile its older advice using the inspected evidence.".into())}).await.unwrap();
+    let mut invalid = reconcile_input(&revision, &ids);
+    invalid.changes[0].target_id = Some("not-a-stored-lesson".into());
+    assert!(reconcile(&settings, &api, invalid).await.is_err());
+    let connection = rusqlite::Connection::open(&db).unwrap();
+    connection.execute_batch("CREATE TRIGGER fixture_reconcile_failure BEFORE INSERT ON lesson_changes WHEN NEW.source_id='unsupported' BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;").unwrap();
+    assert!(
+        reconcile(&settings, &api, reconcile_input(&revision, &ids))
+            .await
+            .is_err()
+    );
+    let store = SqliteStore::open_read_only(&db).unwrap();
+    assert_eq!(
+        store.get(REPO, "earlier").unwrap().unwrap().lesson.status,
+        dreamer::lesson::LessonStatus::Deprecated
+    );
+    assert_eq!(
+        store
+            .get(REPO, "unsupported")
+            .unwrap()
+            .unwrap()
+            .lesson
+            .status,
+        dreamer::lesson::LessonStatus::Candidate
+    );
+    drop(store);
+    let pending = evidence::prepare(
+        &settings,
+        &api,
+        "https://github.com/example/project/pull/12",
+    )
+    .unwrap();
+    assert_eq!(pending["already_processed"], false);
+    assert_eq!(pending["pending_reconciliation"]["draft_count"], 2);
+    let receipt: Value = serde_json::from_slice(
+        &fs::read(
+            settings
+                .cache_dir
+                .join(&revision)
+                .join("reconciliation.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(receipt["complete"], false);
+    let mut different = reconcile_input(&revision, &ids);
+    different.changes[0].reason =
+        "A changed reason cannot conceal an uncertain previous operation.".into();
+    assert!(reconcile(&settings, &api, different).await.is_err());
+    connection
+        .execute_batch("DROP TRIGGER fixture_reconcile_failure;")
+        .unwrap();
+    let finished = reconcile(
+        &settings,
+        &api,
+        dreamer::mac::reconciliation::ReconcileInput {
+            revision: revision.clone(),
+            changes: vec![],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(finished["learning_complete"], true);
+    assert_eq!(finished["outcomes"][0]["outcome"], "already_applied");
+    assert_eq!(finished["outcomes"][1]["outcome"], "applied");
+    assert_eq!(
+        evidence::prepare(
+            &settings,
+            &api,
+            "https://github.com/example/project/pull/12"
+        )
+        .unwrap()["already_processed"],
+        true
+    );
+    assert_eq!(
+        reconcile(&settings, &api, reconcile_input(&revision, &ids))
+            .await
+            .unwrap()["outcomes"][1]["outcome"],
+        "already_applied"
+    );
+    let store = SqliteStore::open_read_only(&db).unwrap();
+    let events = store
+        .lesson_history(&HistoryQuery {
+            repository: REPO.into(),
+            id: "earlier".into(),
+            change_id: None,
+            limit: 20,
+            offset: 0,
+        })
+        .unwrap();
+    assert_eq!(events.changes.len(), 1);
+    assert_eq!(events.changes[0].change.evidence.len(), ids.len());
+    drop(store);
+    // Successful lifecycle work cannot overwrite an incomplete candidate receipt.
+    fs::write(settings.cache_dir.join(&revision).join("publication.json"),serde_json::to_vec(&json!({"complete":false,"revision":revision,"outcomes":[],"in_flight":"unconfirmed-candidate"})).unwrap()).unwrap();
+    assert_eq!(
+        reconcile(&settings, &api, reconcile_input(&revision, &ids))
+            .await
+            .unwrap()["learning_complete"],
+        false
+    );
+    assert_eq!(
+        evidence::prepare(
+            &settings,
+            &api,
+            "https://github.com/example/project/pull/12"
+        )
+        .unwrap()["already_processed"],
+        false
+    );
+    // Even a retry must revalidate current review content before any Pi action.
+    api.comments[0]["body"] = json!("Later feedback changes the claimed correction.");
+    assert!(
+        reconcile(&settings, &api, reconcile_input(&revision, &ids))
+            .await
+            .is_err()
+    );
+    stop.cancel();
+    task.await.unwrap();
 }

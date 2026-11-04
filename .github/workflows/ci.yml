@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  RUST_BACKTRACE: '1'
+
+jobs:
+  checks:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux tests and lint
+            os: ubuntu-24.04
+            features: mac-client
+            lint: true
+          - name: Pi ARM64 tests and release
+            os: ubuntu-24.04-arm
+            features: ''
+            lint: false
+          - name: Mac client tests and release
+            os: macos-15
+            features: mac-client
+            lint: false
+    env:
+      CARGO_FEATURES: ${{ matrix.features }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up stable Rust
+        id: rust
+        shell: bash
+        run: |
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          fi
+          source "$HOME/.cargo/env"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          echo "version=$(rustc --version | cut -d ' ' -f 2)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Rust dependencies and build outputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.version }}-${{ matrix.features }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Check formatting
+        if: matrix.lint
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        if: matrix.lint
+        run: cargo clippy --locked --all-targets --features mac-client -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --locked --features "$CARGO_FEATURES"
+
+      - name: Installer tests
+        run: python3 -m unittest discover -s tests -p 'test_install*.py'
+
+      - name: Native release build
+        run: cargo build --locked --release --features "$CARGO_FEATURES"

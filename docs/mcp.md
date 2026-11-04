@@ -8,7 +8,7 @@ initialize/initialized handshake using raw newline-delimited JSON-RPC.
 
 Use [the Pi service installer](pi.md) and [HTTP client example](../examples/codex.http.toml).
 The single `/mcp` endpoint accepts a read token for search/get or a separate write
-token for candidate submission. `serve` reads `DREAMER_MCP_TOKEN` from its
+token for candidate submission and evidence-backed lifecycle changes. `serve` reads `DREAMER_MCP_TOKEN` from its
 environment; `serve --allow-writes` also requires `DREAMER_MCP_WRITE_TOKEN`. Missing,
 weak or identical tokens cause startup to fail. Native MCP requests must use an
 allowed Host and no browser Origin. A separate [read-only dashboard](dashboard.md)
@@ -68,6 +68,9 @@ provenance, status and storage time. Matching/order are the same as the CLI.
 `get_lesson` accepts `repository` and `id`. It returns
 `{ "repository": "...", "found": true, "lesson": { ... } }`, or `found: false`
 and `lesson: null`. Deprecated lessons remain available for explicit inspection.
+The result also includes the first lifecycle history page. Read-only
+`get_lesson_history` and writer-only `change_lesson` expose bounded audit history
+and evidence-backed corrections; see [lifecycle contracts](lifecycle.md).
 
 For stdio, `submit_candidate` requires `mcp --allow-writes`; HTTP clients need the
 write token and a server started with `serve --allow-writes`.
@@ -84,7 +87,7 @@ not authenticated identity or verified facts.
 
 At most eight blocking database operations run concurrently per process. SQLite's
 five-second busy timeout applies. A write may finish after a client disconnects;
-retry the identical candidate to resolve uncertainty without duplicate imports.
+retry identical inputs to resolve uncertainty without duplicate imports/events.
 
 ## Access and limitations
 
@@ -98,5 +101,5 @@ HTTP enforces bearer roles on every request, with separate legacy session manage
 for read/write clients. Read tokens cannot acquire writer permissions by reusing
 a session ID. Credentials are removed before dispatch to protocol handlers.
 There is no OAuth, unattended collection, standalone model refinement, verification
-or edit/delete workflow. On-demand agent learning uses the separate Mac tools. Pi installation and actual client registration still require
+or content-edit/delete workflow. Lifecycle transitions preserve original records. On-demand agent learning uses the separate Mac tools. Pi installation and actual client registration still require
 deployment-host verification; local tests do not establish a live Pi connection.

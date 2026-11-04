@@ -121,12 +121,24 @@ async fn authentication_origin_host_and_request_size_are_enforced() {
             .status(),
         403
     );
+    // Exercise the real limit layer directly: an early 413 can reset a large
+    // unread TCP upload on macOS, before reqwest can observe its status.
+    let router = http::router(
+        &config,
+        Credentials::new(READ.into(), None).unwrap(),
+        CancellationToken::new(),
+    )
+    .unwrap();
+    let oversized = axum::http::Request::builder()
+        .method("POST")
+        .uri("/mcp")
+        .header("Host", "localhost")
+        .header("Authorization", format!("Bearer {READ}"))
+        .header("Content-Length", 1024 * 1024 + 1)
+        .body(axum::body::Body::from("x".repeat(1024 * 1024 + 1)))
+        .unwrap();
     assert_eq!(
-        client
-            .post(&url)
-            .bearer_auth(READ)
-            .body("x".repeat(1024 * 1024 + 1))
-            .send()
+        tower::ServiceExt::oneshot(router, oversized)
             .await
             .unwrap()
             .status(),
@@ -159,8 +171,8 @@ async fn sdk_clients_use_read_and_write_tokens_against_the_same_endpoint() {
     let (url, shutdown, task) = start(&config, true).await;
     let reader = connect(&url, READ).await;
     let writer = connect(&url, WRITE).await;
-    assert_eq!(reader.list_all_tools().await.unwrap().len(), 3);
-    assert_eq!(writer.list_all_tools().await.unwrap().len(), 4);
+    assert_eq!(reader.list_all_tools().await.unwrap().len(), 4);
+    assert_eq!(writer.list_all_tools().await.unwrap().len(), 6);
     let lesson: Value = serde_json::from_str(FIXTURE).unwrap();
     assert!(
         reader
@@ -332,4 +344,96 @@ async fn service_process_starts_and_exits_cleanly_on_sigterm() {
         .await
         .unwrap();
     assert!(stdout.is_empty());
+}
+
+#[tokio::test]
+async fn lifecycle_http_enforces_writer_role_scope_and_exposes_audit_after_restart() {
+    use dreamer::lifecycle::{ChangeAction, LessonChange};
+    let (_directory, _path, config) = setup();
+    let mut store = SqliteStore::open_existing(&config.data_dir.join("knowledge.sqlite3")).unwrap();
+    let original: Lesson = serde_json::from_str(FIXTURE).unwrap();
+    let mut replacement = original.clone();
+    replacement.id = "replacement".into();
+    store.put_candidate(&original).unwrap();
+    store.put_candidate(&replacement).unwrap();
+    drop(store);
+    let change = LessonChange {
+        repository: REPO.into(),
+        source_id: original.id.clone(),
+        action: ChangeAction::Supersede,
+        target_id: Some(replacement.id.clone()),
+        reason: "Inspected code corrects the earlier account scope advice.".into(),
+        producer: "fixture agent".into(),
+        evidence: replacement.evidence.clone(),
+    };
+    let (url, shutdown, task) = start(&config, true).await;
+    let reader = connect(&url, READ).await;
+    let writer = connect(&url, WRITE).await;
+    assert!(
+        reader
+            .call_tool(
+                CallToolRequestParams::new("change_lesson")
+                    .with_arguments(json!({"change":change}).as_object().unwrap().clone())
+            )
+            .await
+            .is_err()
+    );
+    let mut outside = change.clone();
+    outside.repository = "unconfigured/repo".into();
+    assert_eq!(
+        call(&writer, "change_lesson", json!({"change":outside}))
+            .await
+            .is_error,
+        Some(true)
+    );
+    for expected in ["applied", "unchanged"] {
+        let applied = call(&writer, "change_lesson", json!({"change":change})).await;
+        assert_ne!(applied.is_error, Some(true));
+        assert_eq!(applied.structured_content.unwrap()["outcome"], expected);
+    }
+    let history = call(
+        &reader,
+        "get_lesson_history",
+        json!({"repository":REPO,"id":original.id}),
+    )
+    .await
+    .structured_content
+    .unwrap();
+    assert_eq!(
+        history["changes"][0]["change"],
+        serde_json::to_value(&change).unwrap()
+    );
+    let stored = call(
+        &reader,
+        "get_lesson",
+        json!({"repository":REPO,"id":original.id}),
+    )
+    .await
+    .structured_content
+    .unwrap();
+    assert_eq!(stored["lesson"]["lesson"]["status"], "deprecated");
+    assert_eq!(
+        stored["lesson"]["lifecycle"]["superseded_by"],
+        replacement.id
+    );
+    reader.cancel().await.unwrap();
+    writer.cancel().await.unwrap();
+    shutdown.cancel();
+    task.await.unwrap();
+    let (url, shutdown, task) = start(&config, false).await;
+    let reader = connect(&url, READ).await;
+    assert_eq!(
+        call(
+            &reader,
+            "get_lesson_history",
+            json!({"repository":REPO,"id":original.id,"change_id":change.id()})
+        )
+        .await
+        .structured_content
+        .unwrap()["changes"],
+        history["changes"]
+    );
+    reader.cancel().await.unwrap();
+    shutdown.cancel();
+    task.await.unwrap();
 }

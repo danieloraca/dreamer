@@ -89,7 +89,7 @@ pub async fn reconcile(
     let mut identities = BTreeSet::new();
     for (draft, proof) in input.changes.iter().cloned().zip(proofs) {
         let change=LessonChange {repository:snapshot.repository.clone(),source_id:draft.source_id,action:draft.action,target_id:draft.target_id,reason:draft.reason,
-            producer:"Codex agent via Dreamer Mac; source-backed reconciliation, not independently verified".into(),evidence:proof.evidence}.canonical();
+            producer:"Codex agent via Dreamer Mac; source-backed reconciliation, not independently verified".into(),conversation_evidence: vec![], evidence:proof.evidence}.canonical();
         change.validate()?;
         if !identities.insert(change.id()) {
             return Err("duplicate lifecycle change in batch".into());

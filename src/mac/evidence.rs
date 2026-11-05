@@ -697,7 +697,7 @@ pub fn build_lessons(settings: &Settings, revision: &str, drafts: &[Draft]) -> R
             url: collector::text(&snapshot.pr, "html_url").into(),
             title: collector::text(&snapshot.pr, "title").into(),
         };
-        let lesson=Lesson { id, repository:snapshot.repository.clone(), summary:draft.summary.trim().into(), applies_when:draft.applies_when.trim().into(), status:LessonStatus::Candidate, scope,
+        let lesson=Lesson { id, repository:snapshot.repository.clone(), summary:draft.summary.trim().into(), applies_when:draft.applies_when.trim().into(), status:LessonStatus::Candidate, scope, conversation_evidence: vec![],
             // Legacy schema calls direct (including agent) curation "manual"; no human approval is implied.
             provenance:Provenance { producer:"Codex agent via Dreamer Mac; automatically stored from inspected PR evidence; not independently verified".into(), method:ExtractionMethod::Manual },
             evidence:selected.iter().map(|s| Evidence { source_url:s.source_url.clone(), commit_sha:s.commit_sha.clone(), description:format!("Agent-inspected {} evidence{}; captured revision {revision}. Source text is an assertion; application tests were not run by Dreamer.",s.kind,s.path.as_ref().map(|p|format!(" at {p}")).unwrap_or_default()), pull_request:reference.clone() }).collect() };

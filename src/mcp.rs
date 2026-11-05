@@ -42,6 +42,8 @@ pub const LIST_REPOSITORIES: &str = "list_repositories";
 #[serde(deny_unknown_fields)]
 struct ListInput {}
 
+pub const SUBMIT_CONVERSATION: &str = "submit_conversation_candidate";
+
 pub const SUBMIT_CANDIDATE: &str = "submit_candidate";
 
 #[derive(Deserialize, JsonSchema)]
@@ -66,7 +68,7 @@ struct GetInput {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct SubmitInput {
-    /// Candidate with asserted producer and PR evidence. Never automatically verified.
+    /// Candidate with asserted producer and source evidence. Never automatically verified.
     lesson: Lesson,
 }
 
@@ -138,7 +140,7 @@ impl DreamerMcp {
             ),
             definition::<GetInput>(
                 GET_LESSON,
-                "Get a lesson by repository and ID, including provenance and ordered PR evidence. Returns found=false when absent. May return deprecated lessons for inspection.",
+                "Get a lesson by repository and ID, including provenance and ordered PR and conversation evidence. Returns found=false when absent. May return deprecated lessons for inspection.",
                 true,
             ),
         ];
@@ -151,6 +153,7 @@ impl DreamerMcp {
             tools.push(definition::<LearningRun>(RECORD_RUN,"Report redacted capture/publication/reconciliation status with identifiers, times and counts. Never include prompts, source bodies, credentials or raw exceptions. Exact retries are no-ops; terminal reports cannot be rewritten.",false));
             tools.push(definition::<ChangeInput>(CHANGE_LESSON,
                 "Append an evidence-backed supersede, retire or conflict event. Supersede/retire deprecates the source; conflict leaves both active. Targets must already exist and be active in the same repository. Preserves content/history; exact retries are no-ops. Cannot verify or delete lessons.",false));
+            tools.push(definition::<SubmitInput>(SUBMIT_CONVERSATION, "Store a source-cited conversation candidate with typed claim classes. Requires schema 6. Never accepts a raw transcript; exact retries are no-ops. Does not verify the claim.", false));
             tools.push(definition::<SubmitInput>(SUBMIT_CANDIDATE,
                 "Store a candidate lesson and PR evidence in the server's configured repository. Identical retries are no-ops; changed content at the same ID conflicts. Cannot verify, replace or delete lessons.", false));
         }
@@ -181,7 +184,9 @@ impl DreamerMcp {
             RECALL_LESSONS => serde_json::from_value(arguments).map(Operation::Recall),
             GET_LESSON_HISTORY => serde_json::from_value(arguments).map(Operation::History),
             CHANGE_LESSON => serde_json::from_value(arguments).map(Operation::Change),
-            SUBMIT_CANDIDATE => serde_json::from_value(arguments).map(Operation::Submit),
+            SUBMIT_CANDIDATE | SUBMIT_CONVERSATION => {
+                serde_json::from_value(arguments).map(Operation::Submit)
+            }
             _ => unreachable!("tool availability is checked before parsing"),
         }
         .map_err(|error| tool_error("invalid_input", error))?;

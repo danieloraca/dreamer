@@ -18,6 +18,7 @@ struct Migration {
 }
 
 const MIGRATIONS: &[Migration] = &[
+    // Applied migrations are immutable; append new versions below.
     Migration {
         version: 1,
         name: "knowledge",
@@ -42,6 +43,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 5,
         name: "learning_runs",
         sql: include_str!("../../migrations/0005_learning_runs.sql"),
+    },
+    Migration {
+        version: 6,
+        name: "conversation_evidence",
+        sql: include_str!("../../migrations/0006_conversation_evidence.sql"),
     },
 ];
 
@@ -273,6 +279,14 @@ fn read_lesson(
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    let mut chat_statement = connection.prepare("SELECT payload FROM conversation_evidence WHERE repository=?1 AND lesson_id=?2 ORDER BY ordinal")?;
+    let conversation_evidence = chat_statement
+        .query_map(params![repository, id], |r| r.get::<_, String>(0))?
+        .map(|row| {
+            serde_json::from_str(&row?)
+                .map_err(|_| StoreError::Schema("invalid conversation evidence".into()))
+        })
+        .collect::<Result<Vec<crate::conversation::ConversationEvidence>, StoreError>>()?;
     Ok(Some(StoredLesson {
         lesson: Lesson {
             id: id.into(),
@@ -283,6 +297,7 @@ fn read_lesson(
             scope: read_scope(connection, repository, id)?,
             provenance: Provenance { producer, method },
             evidence,
+            conversation_evidence,
         },
         stored_at,
         lifecycle: read_lifecycle(connection, repository, id)?,
@@ -311,6 +326,7 @@ impl SqliteStore {
                     && prior.phase == run.phase
                     && prior.client_started_at == run.client_started_at
                     && prior.pr == run.pr
+                    && prior.conversation == run.conversation
                     && (run.revision.is_none() || prior.revision == run.revision))
             {
                 // A delayed started report must never undo a terminal outcome.
@@ -321,6 +337,7 @@ impl SqliteStore {
                 || prior.phase != run.phase
                 || prior.client_started_at != run.client_started_at
                 || prior.pr != run.pr
+                || prior.conversation != run.conversation
             {
                 return Err(StoreError::Conflict(
                     "completed run reports cannot be rewritten".into(),
@@ -664,7 +681,7 @@ impl SqliteStore {
              FROM lessons WHERE repository = ?1",
             params![query.repository],
             |row| Ok(super::KnowledgeCounts { total: row.get(0)?, candidate: row.get(1)?,
-                verified: row.get(2)?, deprecated: row.get(3)?, source_prs: row.get(4)?, last_stored_at: row.get(5)? }),
+                verified: row.get(2)?, deprecated: row.get(3)?, source_prs: row.get(4)?, last_stored_at: row.get(5)?, source_chats: tx.query_row("SELECT COUNT(DISTINCT thread_id) FROM conversation_evidence WHERE repository=?1",[&query.repository],|r|r.get(0))? }),
         )?;
         let predicate = "repository = ?1 AND (?2 IS NULL OR status = ?2)
             AND instr(lower(id || ' ' || summary || ' ' || applies_when), lower(?3)) > 0";
@@ -764,6 +781,9 @@ impl LessonStore for SqliteStore {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![lesson.repository, lesson.id, ordinal as i64, pr.number, pr.head_sha, evidence.source_url, evidence.commit_sha, evidence.description],
             )?;
+        }
+        for (ordinal, proof) in lesson.conversation_evidence.iter().enumerate() {
+            transaction.execute("INSERT INTO conversation_evidence(repository,lesson_id,ordinal,thread_id,payload) VALUES (?1,?2,?3,?4,?5)", params![lesson.repository,lesson.id,ordinal as i64,proof.thread_id,serde_json::to_string(proof).expect("chat evidence serialization")])?;
         }
         for (kind, values) in [
             ("component", &lesson.scope.components),

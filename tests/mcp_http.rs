@@ -172,7 +172,7 @@ async fn sdk_clients_use_read_and_write_tokens_against_the_same_endpoint() {
     let reader = connect(&url, READ).await;
     let writer = connect(&url, WRITE).await;
     assert_eq!(reader.list_all_tools().await.unwrap().len(), 6);
-    assert_eq!(writer.list_all_tools().await.unwrap().len(), 9);
+    assert_eq!(writer.list_all_tools().await.unwrap().len(), 10);
     let report = json!({"repository":REPO,"id":"a".repeat(64),"phase":"capture","state":"failed","client_started_at":"2026-11-05T12:00:00Z","client_finished_at":"2026-11-05T12:01:00Z","pr":12});
     assert!(
         reader
@@ -396,6 +396,7 @@ async fn lifecycle_http_enforces_writer_role_scope_and_exposes_audit_after_resta
         target_id: Some(replacement.id.clone()),
         reason: "Inspected code corrects the earlier account scope advice.".into(),
         producer: "fixture agent".into(),
+        conversation_evidence: vec![],
         evidence: replacement.evidence.clone(),
     };
     let (url, shutdown, task) = start(&config, true).await;

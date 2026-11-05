@@ -1,0 +1,8 @@
+# Mac-only settings; keep credentials in an existing private 0600 file.
+repository = "owner/repo"
+repositories = ["owner/repo"]
+endpoint = "http://pi-hostname:3445/mcp"
+writer_token_file = "/absolute/private/writer.env"
+cache_dir = "/absolute/private/dreamer-cache"
+# Selected Codex chats, on demand; no background/history crawler.
+learn_conversations = false

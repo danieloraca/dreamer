@@ -44,6 +44,7 @@ pub struct KnowledgeCounts {
     pub verified: u64,
     pub deprecated: u64,
     pub source_prs: u64,
+    pub source_chats: u64,
     pub last_stored_at: Option<String>,
 }
 

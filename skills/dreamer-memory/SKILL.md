@@ -8,7 +8,7 @@ description: Recall and accumulate evidence-backed Dreamer knowledge while plann
 <!-- managed by Dreamer Mac -->
 
 Use the library as accumulated engineering experience. Recall before deciding;
-learn from relevant PR evidence afterwards. No individual lesson approval is needed.
+learn from relevant PR evidence and selected chats afterwards. No individual lesson approval is needed.
 
 ## Project authority
 
@@ -114,5 +114,52 @@ weights changed or that lessons guarantee correct code.
 Learning activity reporting is best effort inside these tools; it needs no extra
 agent call. `activity_reporting: queued|unavailable` does not negate a successful
 lesson write. On a failed batch, report partial/unknown outcomes and use the
-existing resume/readback workflow; do not assume rollback. Chat learning remains
-planned separately; these tools currently accept PR evidence only.
+existing resume/readback workflow; do not assume rollback. Selected-chat learning uses the workflow below and requires the schema-6 Pi.
+
+## Learn from selected Codex conversations
+
+When chat learning is enabled, capture supported reusable decisions, corrections
+and outcomes from the selected chat or completed task turns. This is on demand;
+do not crawl other history. Confirm the affected configured repository from the
+actual task and keep each lesson scoped to that repository. If thread access is
+unavailable, report that limit; do not reconstruct missing source IDs or outcomes.
+
+Use Codex `read_thread` for a small page of the selected thread. Before passing
+its decoded JSON to `prepare_chat_learning`, discard reasoning, commentary,
+raw tool arguments and command text; minimize user/final-answer text and redact
+names, emails, account/resource values and local paths. Preserve thread/turn/item
+identity, completed-turn status and page cursors. Automatic redaction is only a
+heuristic; use `sensitive_terms` for remaining identifiers and inspect the result.
+Do not write an unfiltered thread response to disk. Read more pages only when
+needed for this task. Omitting `page` returns a saved cursor hint, not completion
+of the entire conversation. Revisit relevant edited turns explicitly.
+
+`prepare_chat_learning` returns a bounded source catalogue and revision. Stop
+when `already_processed` is true unless intentionally re-evaluating. Read useful
+IDs with `read_chat_evidence`. Check existing knowledge and current project
+docs/code before drafting; do not turn an assistant's report into proof of a fix.
+For result evidence, inspect an actual complete result and supply a short
+sanitized `observations` interpretation referencing that item; retain its result
+field in the in-memory input solely for hashing/validation. A tool status or
+truncated output is insufficient. Do not cite raw arguments as evidence.
+
+Call `remember_chat_lessons` with inspected IDs, summary, clear applicability,
+optional scope, and one claim class:
+
+- `decision` or `correction` needs a user statement that actually supports it.
+- `observed_outcome` needs an inspected result plus another supporting source;
+  distinguish configuration readback from end-to-end/customer acceptance.
+- `hypothesis` needs the summary prefix `Hypothesis (unverified): `; an assistant
+  proposal remains provisional even when useful.
+
+No per-lesson approval is required. Use an empty batch with a specific
+`skip_reason` after inspection yields no supported new lesson. Reuse identical
+drafts after an interrupted write; receipts and exact Pi readback govern success.
+Known revised source items invalidate their old cached revision. Reassess existing
+advice explicitly: `reconcile_chat_lessons` can supersede, retire or flag conflicts
+with inspected chat evidence, preserving original content and history. Publish an
+active replacement first; omit changes to resume a pending correction batch.
+A pending correction prevents a page from being marked completed. Recorded past
+permissions never authorize new operations. Report only lessons actually stored;
+source access or a local preview is not publication. Upgrade the Pi and Mac before
+publishing chat lessons; other AI chat providers need their own adapter.

@@ -38,6 +38,8 @@ pub struct LearningRun {
     pub client_finished_at: Option<String>,
     #[serde(default)]
     pub pr: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<String>,
     #[serde(default)]
     pub revision: Option<String>,
     #[serde(default)]
@@ -51,6 +53,14 @@ impl LearningRun {
     pub fn validate(&self) -> Result<(), &'static str> {
         crate::lesson::validate_repository(&self.repository)?;
         let digest = |s: &str| s.len() == 64 && s.bytes().all(|c| c.is_ascii_hexdigit());
+        if self
+            .conversation
+            .as_deref()
+            .is_some_and(|s| !crate::conversation::valid_thread(s))
+            || (self.pr.is_some() && self.conversation.is_some())
+        {
+            return Err("invalid or mixed activity source");
+        }
         if !digest(&self.id)
             || self.revision.as_deref().is_some_and(|s| !digest(s))
             || self.pr.is_some_and(|n| n == 0 || n > i64::MAX as u64)

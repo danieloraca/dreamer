@@ -117,6 +117,7 @@ fn settings(root: &Path) -> Settings {
         repositories: vec![],
         endpoint: "http://127.0.0.1:1/mcp".into(),
         writer_token_file: writer,
+        learn_conversations: false,
         cache_dir: root.join("cache"),
     }
 }
@@ -438,7 +439,7 @@ async fn mac_stdio_exposes_workflow_tools_without_opening_github_or_pi() {
     command.arg("mac").arg("--settings").arg(path).arg("mcp");
     let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 7);
+    assert_eq!(tools.len(), 11);
     let error = client
         .call_tool(
             CallToolRequestParams::new("recall_knowledge")
@@ -553,6 +554,7 @@ async fn another_repo_keeps_capture_ids_publication_and_recall_in_its_own_scope(
             action: dreamer::lifecycle::ChangeAction::Conflict,
             reason: "The two inspected claims disagree for this same account scope.".into(),
             producer: "fixture".into(),
+            conversation_evidence: vec![],
             evidence: lesson.evidence.clone(),
         })
         .unwrap();
@@ -1294,6 +1296,52 @@ async fn older_pi_fallback_uses_the_same_exclusion_guard_and_rejects_scoped_writ
     .await
     .unwrap_err();
     assert!(error.to_string().contains("Pi upgrade required"));
+    // An older server must receive no conversation mutation calls.
+    use dreamer::mac::conversations::{
+        self, ChatDraft, ChatReadInput, PrepareChatInput, RememberChatInput,
+    };
+    settings.learn_conversations = true;
+    let capture = conversations::prepare(
+        &settings,
+        PrepareChatInput {
+            repository: REPO.into(),
+            thread_id: "00000000-0000-0000-0000-000000000001".into(),
+            page: Some(
+                serde_json::from_str(include_str!("../fixtures/codex-conversation.json")).unwrap(),
+            ),
+            observations: vec![],
+            sensitive_terms: vec!["Customer Alpha".into()],
+        },
+    )
+    .unwrap();
+    let revision = capture["revision"].as_str().unwrap().to_owned();
+    conversations::read(
+        &settings,
+        ChatReadInput {
+            repository: REPO.into(),
+            revision: revision.clone(),
+            ids: vec!["user-1".into()],
+        },
+    )
+    .unwrap();
+    let error = conversations::remember(
+        &settings,
+        RememberChatInput {
+            repository: REPO.into(),
+            revision,
+            lessons: vec![ChatDraft {
+                summary: "Preserve existing access until the replacement is tested.".into(),
+                applies_when: "For staged identity changes with explicit user direction.".into(),
+                claim: dreamer::conversation::ConversationClaim::Decision,
+                scope: Default::default(),
+                evidence_ids: vec!["user-1".into()],
+            }],
+            skip_reason: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("upgrade the Pi to schema 6"));
     stop.cancel();
     task.await.unwrap();
 }

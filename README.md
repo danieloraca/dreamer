@@ -1,7 +1,7 @@
 # Dreamer
 
 A Pi-hosted knowledge library for coding agents. Store evidence-backed lessons
-from pull requests and retrieve them through MCP.
+from pull requests and selected Codex conversations, then retrieve them through MCP.
 
 Built with Rust and SQLite. Candidate imports, search, and HTTP/stdio MCP are
 implemented. Mac MCP tools let Codex recall prior knowledge and automatically
@@ -68,6 +68,7 @@ cargo clippy --locked --all-targets -- -D warnings
 - [Activity, backups and recovery](docs/operations.md)
 - [CI checks and local equivalents](docs/ci.md)
 - [Context-aware retrieval](docs/retrieval.md)
+- [Selected-chat learning and rollout](docs/conversations.md)
 
 - [Master plan and milestone status](docs/master-plan.md)
 - [Correcting and consolidating lessons](docs/lifecycle.md)

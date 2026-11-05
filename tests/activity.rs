@@ -11,6 +11,7 @@ fn run(n: usize) -> LearningRun {
         state: RunState::Started,
         client_started_at: "2026-11-05T12:00:00Z".into(),
         client_finished_at: None,
+        conversation: None,
         pr: Some(12),
         revision: Some("a".repeat(64)),
         inserted: None,
@@ -107,7 +108,7 @@ fn schema_four_upgrades_without_changing_knowledge_and_checker_never_migrates() 
     drop(store);
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection
-        .execute_batch("DROP TABLE learning_runs; DELETE FROM schema_migrations WHERE version=5;")
+        .execute_batch("DROP TABLE conversation_evidence; DELETE FROM schema_migrations WHERE version=6; DROP TABLE learning_runs; DELETE FROM schema_migrations WHERE version=5;")
         .unwrap();
     drop(connection);
     assert!(SqliteStore::check_file(&path, false).is_err());
@@ -122,7 +123,7 @@ fn schema_four_upgrades_without_changing_knowledge_and_checker_never_migrates() 
             .lesson,
         lesson
     );
-    assert_eq!(SqliteStore::check_file(&path, false).unwrap(), 5);
+    assert_eq!(SqliteStore::check_file(&path, false).unwrap(), 6);
     let missing = dir.path().join("missing.sqlite3");
     assert!(SqliteStore::check_file(&missing, true).is_err());
     assert!(!missing.exists());
@@ -169,7 +170,7 @@ fn checked_snapshot_restores_a_readable_store_without_replacing_live_knowledge()
         .output()
         .unwrap();
     assert!(output.status.success(), "{:?}", output);
-    assert_eq!(SqliteStore::check_file(&restored, false).unwrap(), 5);
+    assert_eq!(SqliteStore::check_file(&restored, false).unwrap(), 6);
     assert_eq!(
         SqliteStore::open_read_only(&restored)
             .unwrap()

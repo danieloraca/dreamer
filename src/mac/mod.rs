@@ -1,5 +1,6 @@
 //! Agent-driven Mac learning. GitHub stays on the Mac; SQLite stays behind Pi MCP.
 pub mod activity;
+pub mod conversations;
 pub mod evidence;
 pub mod reconciliation;
 mod remote;
@@ -26,6 +27,8 @@ pub struct Settings {
     pub endpoint: String,
     pub writer_token_file: PathBuf,
     pub cache_dir: PathBuf,
+    #[serde(default)]
+    pub learn_conversations: bool,
 }
 impl Settings {
     pub fn load(path: &Path) -> Result<Self> {
@@ -96,6 +99,44 @@ impl Settings {
 pub enum MacCommand {
     /// Run on-demand Mac MCP tools over stdio; no polling or model API calls.
     Mcp,
+    /// Capture one explicitly selected decoded Codex thread page (no crawling).
+    PrepareChat {
+        #[arg(long)]
+        file: PathBuf,
+    },
+    /// Inspect sanitized chat source IDs before extracting lessons.
+    ReadChat {
+        #[arg(long)]
+        repository: String,
+        #[arg(long)]
+        revision: String,
+        #[arg(long, required = true)]
+        id: Vec<String>,
+    },
+    /// Preview source-checked chat lessons locally, without contacting the Pi.
+    PreviewChat {
+        #[arg(long)]
+        repository: String,
+        #[arg(long)]
+        revision: String,
+        #[arg(long)]
+        file: PathBuf,
+    },
+    /// Publish source-checked chat lessons, or finish a justified no-new page.
+    RememberChat {
+        #[arg(long)]
+        repository: String,
+        #[arg(long)]
+        revision: String,
+        #[arg(
+            long,
+            conflicts_with = "skip_reason",
+            required_unless_present = "skip_reason"
+        )]
+        file: Option<PathBuf>,
+        #[arg(long, conflicts_with = "file")]
+        skip_reason: Option<String>,
+    },
     /// Inspect redacted local learning reports; optionally flush queued reports.
     Activity {
         #[arg(long)]
@@ -118,6 +159,15 @@ pub enum MacCommand {
         id: Vec<String>,
         #[arg(long, default_value_t = 0)]
         offset: usize,
+    },
+    /// Correct existing knowledge with inspected conversation evidence; omit file to resume.
+    ReconcileChat {
+        #[arg(long)]
+        repository: String,
+        #[arg(long)]
+        revision: String,
+        #[arg(long)]
+        file: Option<PathBuf>,
     },
     /// Recall lessons using a few short task/component terms.
     Recall {
@@ -168,6 +218,26 @@ pub async fn run(path: PathBuf, command: MacCommand) -> std::result::Result<(), 
             return server::serve(settings).await;
         }
         let value: Value = match command {
+            MacCommand::PrepareChat {file} => {
+                let input: conversations::PrepareChatInput=serde_json::from_slice(&fs::read(file)?)?;
+                let context=serde_json::json!({"repository":input.repository,"thread_id":input.thread_id});
+                activity::track(&settings,"prepare_chat_learning",&context,async {conversations::prepare(&settings,input)}).await?
+            }
+            MacCommand::ReadChat {repository,revision,id} => conversations::read(&settings,conversations::ChatReadInput{repository,revision,ids:id})?,
+            MacCommand::PreviewChat {repository,revision,file} => {
+                let drafts: Vec<conversations::ChatDraft>=serde_json::from_slice(&fs::read(file)?)?;
+                serde_json::to_value(conversations::build(&settings,&repository,&revision,&drafts)?)?
+            }
+            MacCommand::RememberChat {repository,revision,file,skip_reason} => {
+                let lessons=match file {Some(file)=>serde_json::from_slice(&fs::read(file)?)?,None=>Vec::new()};
+                let context=serde_json::json!({"repository":repository,"revision":revision});
+                activity::track(&settings,"remember_chat_lessons",&context,async {conversations::remember(&settings,conversations::RememberChatInput{repository,revision,lessons,skip_reason}).await}).await?
+            }
+            MacCommand::ReconcileChat {repository,revision,file} => {
+                let changes=match file {Some(file)=>serde_json::from_slice(&fs::read(file)?)?,None=>Vec::new()};
+                let context=serde_json::json!({"repository":repository,"revision":revision});
+                activity::track(&settings,"reconcile_chat_lessons",&context,async {conversations::reconcile(&settings,conversations::ReconcileChatInput{repository,revision,changes}).await}).await?
+            }
             MacCommand::Activity {sync}=>{
                 let mut value=activity::local_summary(&settings);
                 if sync {value["activity_reporting"]=serde_json::json!(activity::flush(&settings).await);}

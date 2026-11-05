@@ -40,12 +40,12 @@
   function sourceLink(url, label) {
     try {
       const parsed = new URL(url);
-      if (parsed.protocol !== 'https:' || parsed.username || parsed.password) throw new Error('Unsafe source URL');
+      if ((parsed.protocol !== 'https:' && !/^codex:\/\/threads\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(url)) || parsed.username || parsed.password) throw new Error('Unsafe source URL');
       const a = node('a', '', `${label} ↗`);
       a.href = parsed.href; a.target = '_blank'; a.rel = 'noopener noreferrer';
       return a;
     } catch {
-      return node('span', 'source-unavailable', 'Source link unavailable (HTTPS required).');
+      return node('span', 'source-unavailable', 'Source link unavailable (HTTPS or a valid Codex thread required).');
     }
   }
   function renderDetail(stored) {
@@ -82,11 +82,17 @@
     const fields = node('dl', 'provenance');
     for (const [label, value] of [['Proposed by', lesson.provenance.producer], ['Method', lesson.provenance.method], ['Stored', date(stored.stored_at)]]) fields.append(node('dt', '', label), node('dd', '', value));
     provenance.append(fields); detail.append(provenance);
+    const sources = [...lesson.evidence, ...(lesson.conversation_evidence || [])];
     const evidence = node('section', 'detail-section');
     const title = node('div', 'evidence-title');
-    title.append(node('h3', '', 'Follow the evidence'), node('span', '', `${lesson.evidence.length} ${lesson.evidence.length === 1 ? 'source' : 'sources'}`));
+    title.append(node('h3', '', 'Follow the evidence'), node('span', '', `${sources.length} ${sources.length === 1 ? 'source' : 'sources'}`));
     evidence.append(title);
-    for (const item of lesson.evidence) {
+    for (const item of sources) {
+      if (item.provider === 'codex') {
+        const card=node('article','evidence-card');
+        card.append(node('div','evidence-meta',`Codex conversation · ${item.claim} · ${item.kind}`),sourceLink(item.source_url,'Open source chat'),node('p','',item.description),node('code','',`Turn ${item.turn_id} · Item ${item.item_id}`),node('code','',`Digest ${item.content_sha256}`),node('span','',`Observed ${date(item.observed_at)} · Excerpt, not independently verified`));
+        evidence.append(card); continue;
+      }
       const card = node('article', 'evidence-card');
       const type = item.source_url.includes('#discussion_') ? 'Review discussion' : item.source_url.includes('/commit/') ? 'Follow-up commit' : item.source_url.includes('/blob/') ? 'Pinned source' : 'Source';
       const meta = node('div', 'evidence-meta');
@@ -136,7 +142,7 @@
         for (const related of [change.source_id,change.target_id].filter(x=>x && x!==id)) {
           const button=node('button','text-button relation-button',`View ${related} ↗`);button.type='button';button.addEventListener('click',()=>openLesson(related));row.append(button);
         }
-        for (const evidence of change.evidence || []) row.append(sourceLink(evidence.source_url,'Correction evidence'));
+        for (const evidence of [...(change.evidence || []),...(change.conversation_evidence || [])]) row.append(sourceLink(evidence.source_url,'Correction evidence'));
         section.append(row);
       }
       for (const [label,offset] of [['Previous events',nextOffset>0?Math.max(0,nextOffset-10):null],['More events',value.history.next_offset]]) {
@@ -157,7 +163,7 @@
       if (!value.runs.length) $('activity-list').append(node('p','metric-note','No activity reports on this page. Existing knowledge predates reporting.'));
       for (const run of value.runs) {
         const counts=run.inserted===null || run.inserted===undefined?'Outcome counts unknown':`${run.inserted} new · ${run.reused} reused · ${run.changed} corrected`;
-        $('activity-list').append(node('div',`run-row ${run.state}`,`${run.phase} · ${run.state==='started'?'completion not reported':run.state} · ${run.pr?'PR #'+run.pr:'no PR'} · received ${date(run.reported_at)}${run.phase==='capture'?'':' · '+counts}`));
+        $('activity-list').append(node('div',`run-row ${run.state}`,`${run.phase} · ${run.state==='started'?'completion not reported':run.state} · ${run.pr?'PR #'+run.pr:run.conversation?'Codex chat':'source revision'} · received ${date(run.reported_at)}${run.phase==='capture'?'':' · '+counts}`));
       }
       $('activity-more').hidden=value.next_offset===null;
       $('activity-more').onclick=()=>loadActivity(value.next_offset);
@@ -178,7 +184,8 @@
     $('total').textContent = counts.total;
     $('candidates').textContent = counts.candidate;
     $('verified').textContent = counts.verified;
-    $('source-prs').textContent = counts.source_prs;
+    $('source-prs').textContent = counts.source_prs + (counts.source_chats || 0);
+    $('source-note').textContent = `${counts.source_prs} PRs · ${counts.source_chats || 0} chats`;
     $('matching-count').textContent = matching;
     $('last-stored').textContent = counts.last_stored_at ? `Last stored ${date(counts.last_stored_at)}` : 'No lessons stored yet';
     $('lesson-list').replaceChildren();
@@ -191,8 +198,10 @@
       const header = node('span', 'lesson-card-header');
       header.append(badge(lesson.status), node('span', 'card-arrow', '↗'));
       const prs = [...new Set(lesson.evidence.map(item => item.pull_request.number))];
+      const sources = [...lesson.evidence,...(lesson.conversation_evidence || [])];
+      const chats = new Set((lesson.conversation_evidence || []).map(item=>item.thread_id)).size;
       const footer = node('span', 'card-footer');
-      footer.append(node('span', '', prs.map(number => `PR #${number}`).join(', ')), node('span', '', `${lesson.evidence.length} ${lesson.evidence.length === 1 ? 'source' : 'sources'}`), node('span', '', date(stored.stored_at)));
+      footer.append(node('span', '', [...prs.map(number => `PR #${number}`),...(chats?[`${chats} Codex ${chats===1?'chat':'chats'}`]:[])].join(', ')), node('span', '', `${sources.length} ${sources.length === 1 ? 'source' : 'sources'}`), node('span', '', date(stored.stored_at)));
       card.append(header, node('span', 'card-title', lesson.summary), node('span', 'card-id', lesson.id), footer);
       card.addEventListener('click', () => {
         selectedId = lesson.id;

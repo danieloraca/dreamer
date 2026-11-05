@@ -19,6 +19,7 @@ fn change(action: ChangeAction, source: &str, target: Option<&str>) -> LessonCha
         target_id: target.map(str::to_owned),
         reason: "New inspected PR evidence corrects the earlier advice.".into(),
         producer: "synthetic test agent".into(),
+        conversation_evidence: vec![],
         evidence: sample.evidence,
     }
 }
@@ -55,13 +56,13 @@ fn schema_two_upgrade_preserves_knowledge_and_requires_explicit_migration() {
     };
     let connection = Connection::open(&db).unwrap();
     connection
-        .execute_batch("DROP TABLE learning_runs; DELETE FROM schema_migrations WHERE version=5; DROP TABLE lesson_scope; DELETE FROM schema_migrations WHERE version=4; DROP TABLE lesson_changes; DELETE FROM schema_migrations WHERE version=3;")
+        .execute_batch("DROP TABLE conversation_evidence; DELETE FROM schema_migrations WHERE version=6; DROP TABLE learning_runs; DELETE FROM schema_migrations WHERE version=5; DROP TABLE lesson_scope; DELETE FROM schema_migrations WHERE version=4; DROP TABLE lesson_changes; DELETE FROM schema_migrations WHERE version=3;")
         .unwrap();
     drop(connection);
     assert!(SqliteStore::open_read_only(&db).is_err());
     assert!(SqliteStore::open_existing(&db).is_err());
     let store = SqliteStore::open(&db).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 5);
+    assert_eq!(store.schema_version().unwrap(), 6);
     assert_eq!(
         store
             .get(&original.lesson.repository, "original")

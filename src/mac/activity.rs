@@ -22,16 +22,45 @@ struct LocalRun {
 fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
-fn context(
-    settings: &Settings,
-    name: &str,
-    input: &Value,
-) -> Result<(RunPhase, String, u64, Option<String>)> {
+type RunContext = (
+    RunPhase,
+    String,
+    Option<u64>,
+    Option<String>,
+    Option<String>,
+);
+fn context(settings: &Settings, name: &str, input: &Value) -> Result<RunContext> {
     match name {
+        "prepare_chat_learning" => {
+            let repo = settings.select_repository(input["repository"].as_str())?;
+            let thread = input["thread_id"]
+                .as_str()
+                .ok_or("selected thread required")?;
+            if !crate::conversation::valid_thread(thread) {
+                return Err("invalid thread".into());
+            }
+            Ok((RunPhase::Capture, repo, None, None, Some(thread.into())))
+        }
+        "remember_chat_lessons" | "reconcile_chat_lessons" => {
+            let revision = input["revision"].as_str().ok_or("chat revision required")?;
+            let repo = input["repository"].as_str().ok_or("repository required")?;
+            let (repo, thread) = super::conversations::run_source(settings, repo, revision)?;
+            Ok((
+                if name == "remember_chat_lessons" {
+                    RunPhase::Publication
+                } else {
+                    RunPhase::Reconciliation
+                },
+                repo,
+                None,
+                Some(revision.into()),
+                Some(thread),
+            ))
+        }
         "prepare_pr_learning" => {
             let parsed: super::PrepareInput = serde_json::from_value(input.clone())?;
             let (repo, pr) = evidence::resolve_pr(settings, &parsed.pr)?;
-            Ok((RunPhase::Capture, repo, pr, None))
+            Ok((RunPhase::Capture, repo, Some(pr), None, None))
         }
         "remember_pr_lessons" | "reconcile_pr_lessons" => {
             let revision = if name == "remember_pr_lessons" {
@@ -48,8 +77,9 @@ fn context(
                     RunPhase::Reconciliation
                 },
                 repo,
-                pr,
+                Some(pr),
                 Some(revision),
+                None,
             ))
         }
         _ => Err("operation does not emit learning activity".into()),
@@ -129,7 +159,7 @@ fn acknowledge(settings: &Settings, path: &std::path::Path, sent: &LocalRun) -> 
     Ok(())
 }
 fn begin(settings: &Settings, name: &str, input: &Value) -> Result<(PathBuf, LocalRun)> {
-    let (phase, repository, pr, revision) = context(settings, name, input)?;
+    let (phase, repository, pr, revision, conversation) = context(settings, name, input)?;
     settings.cache()?;
     let directory = settings.cache_dir.join("runs");
     if !directory.exists() {
@@ -152,7 +182,8 @@ fn begin(settings: &Settings, name: &str, input: &Value) -> Result<(PathBuf, Loc
         state: RunState::Started,
         client_started_at: now(),
         client_finished_at: None,
-        pr: Some(pr),
+        pr,
+        conversation,
         revision,
         inserted: None,
         reused: None,
@@ -227,7 +258,12 @@ where
 {
     if !matches!(
         name,
-        "prepare_pr_learning" | "remember_pr_lessons" | "reconcile_pr_lessons"
+        "prepare_pr_learning"
+            | "remember_pr_lessons"
+            | "reconcile_pr_lessons"
+            | "prepare_chat_learning"
+            | "remember_chat_lessons"
+            | "reconcile_chat_lessons"
     ) {
         return operation.await;
     }
@@ -301,6 +337,7 @@ mod tests {
             repositories: vec![],
             endpoint: "http://127.0.0.1:1/mcp".into(),
             writer_token_file: writer,
+            learn_conversations: false,
             cache_dir: dir.path().join("cache"),
         };
         let input = json!({"pr":"https://github.com/example/project/pull/12"});

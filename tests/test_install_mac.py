@@ -65,6 +65,21 @@ class MacInstallerTests(unittest.TestCase):
         self.assertEqual(result['endpoint'], 'http://127.0.0.1:9988/mcp')
         self.assertEqual(result['writer_token_file'], 'private.env')
 
+    def test_selected_chat_enablement_preserves_scope_and_stays_enabled(self):
+        with patch.object(installer.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)):
+            _, settings = installer.install(self.home, self.binary, self.writer)
+            self.assertNotIn('learn_conversations', tomllib.loads(settings.read_text()))
+            before = tomllib.loads(settings.read_text())
+            installer.install(self.home, self.binary, self.writer, enable_conversations=True)
+            enabled = tomllib.loads(settings.read_text())
+            self.assertTrue(enabled.pop('learn_conversations'))
+            self.assertEqual(enabled, before)
+            installer.install(self.home, self.binary, self.writer)
+            self.assertTrue(tomllib.loads(settings.read_text())['learn_conversations'])
+            settings.write_text(settings.read_text().replace('learn_conversations = true', 'learn_conversations = false # local'))
+            installer.install(self.home, self.binary, self.writer, enable_conversations=True)
+            self.assertTrue(tomllib.loads(settings.read_text())['learn_conversations'])
+
     def test_unmanaged_mcp_is_rejected_before_installation(self):
         self.codex.write_text(self.original + '\n[mcp_servers.dreamer_mac]\ncommand = "operator-command"\n')
         before = self.codex.read_bytes()

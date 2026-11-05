@@ -1,5 +1,5 @@
 use super::{
-    Result, Settings,
+    Result, Settings, conversations,
     evidence::{self, GetInput, PrepareInput, ReadInput, RecallInput, RememberInput},
     reconciliation::{self, ReconcileInput},
     remote,
@@ -35,6 +35,26 @@ impl MacMcp {
             settings: Arc::new(settings),
             gate: Arc::new(tokio::sync::Mutex::new(())),
             tools: vec![
+                crate::mcp::definition::<conversations::ReconcileChatInput>(
+                    "reconcile_chat_lessons",
+                    "Supersede, retire or flag conflicts using inspected conversation sources. Publish an active replacement first; preserve history. Omit changes to resume an identical pending batch. Completion of a page cannot hide pending corrections.",
+                    false,
+                ),
+                crate::mcp::definition::<conversations::PrepareChatInput>(
+                    "prepare_chat_learning",
+                    "Capture only a selected Codex read_thread page for an explicitly configured repository. Discards reasoning, tool arguments and commands before retention. Inspect completed messages; sanitize customer/resource data. No crawler. Omit page to read the last completed-page cursor hint. Requires enabled Mac chat source.",
+                    true,
+                ),
+                crate::mcp::definition::<conversations::ChatReadInput>(
+                    "read_chat_evidence",
+                    "Read 1–8 captured sanitized chat excerpts and mark the delivered IDs inspected. User statements, assistant reports and inspected results have separate types. Excerpts are not full transcripts or verified business outcomes.",
+                    true,
+                ),
+                crate::mcp::definition::<conversations::RememberChatInput>(
+                    "remember_chat_lessons",
+                    "Publish up to ten source-cited conversation lessons automatically after reading evidence and current docs/code. Decisions/corrections need user evidence; observed outcomes need inspected result evidence; hypotheses require the unverified prefix. Empty batch needs skip_reason. Exact readback and resumable receipt; requires upgraded Pi. No per-lesson approval.",
+                    false,
+                ),
                 crate::mcp::definition::<ListInput>(
                     "list_repositories",
                     "List the Mac configured repository allowlist and default. Select the affected repository for recall. The Pi must also allow the same repository before publication.",
@@ -115,6 +135,10 @@ impl ServerHandler for MacMcp {
         let activity_settings = settings.clone();
         let result: Result<Value> = super::activity::track(&activity_settings,request.name.as_ref(),&activity_input,async {
             match request.name.as_ref() {
+                "reconcile_chat_lessons" => conversations::reconcile(&settings,parse(value)?).await,
+                "prepare_chat_learning" => {let input=parse::<conversations::PrepareChatInput>(value)?;tokio::task::spawn_blocking(move ||conversations::prepare(&settings,input)).await?}
+                "read_chat_evidence" => {let input=parse::<conversations::ChatReadInput>(value)?;tokio::task::spawn_blocking(move ||conversations::read(&settings,input)).await?}
+                "remember_chat_lessons" => conversations::remember(&settings,parse(value)?).await,
                 "list_repositories" => {
                     let _: ListInput = parse(value)?;
                     Ok(json!({"default_repository":settings.repository,"repositories":settings.repositories()}))

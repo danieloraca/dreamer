@@ -231,6 +231,17 @@ fn compact_recall(
             640,
         );
         let evidence = lesson["evidence"].as_array().ok_or("missing evidence")?;
+        let chats = lesson["conversation_evidence"].as_array();
+        let chat_threads: BTreeSet<_> = chats
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e["thread_id"].as_str())
+            .collect();
+        let chat_claims: BTreeSet<_> = chats
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e["claim"].as_str())
+            .collect();
         let prs: BTreeSet<_> = evidence
             .iter()
             .filter_map(|e| e["pull_request"]["number"].as_u64())
@@ -244,7 +255,7 @@ fn compact_recall(
         });
         let scope=lesson.get("scope").map(|scope|json!({"components":scope["components"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>()),"paths":scope["paths"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>()),"has_exclusions":scope["excluded_terms"].as_array().is_some_and(|v|!v.is_empty()),"preview_only":true}));
         let context=stored.get("relevance").map(|r|json!({"score":r["score"],"matched_tokens":r["matched_tokens"].as_array().map(|v|v.iter().take(6).collect::<Vec<_>>()),"matched_components":r["matched_components"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>()),"matched_paths":r["matched_paths"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>())}));
-        let preview = json!({"lesson":{"id":id,"summary":summary,"applies_when":applies_when,"status":lesson["status"]},"lifecycle":lifecycle,"scope":scope,"relevance":context,"matching_queries":matches,"evidence_count":evidence.len(),"source_prs":prs.into_iter().take(4).collect::<Vec<_>>(),"shortened":{"summary":summary_shortened,"applies_when":applicability_shortened},"needs_details":true});
+        let preview = json!({"lesson":{"id":id,"summary":summary,"applies_when":applies_when,"status":lesson["status"]},"lifecycle":lifecycle,"scope":scope,"relevance":context,"matching_queries":matches,"evidence_count":evidence.len()+chats.map_or(0,Vec::len),"source_prs":prs.into_iter().take(4).collect::<Vec<_>>(),"source_chats":chat_threads.into_iter().take(3).collect::<Vec<_>>(),"conversation_claims":chat_claims.into_iter().take(3).collect::<Vec<_>>(),"shortened":{"summary":summary_shortened,"applies_when":applicability_shortened},"needs_details":true});
         reply["lessons"].as_array_mut().unwrap().push(preview);
         if serde_json::to_vec(&reply)?.len() > 11_700 {
             reply["lessons"].as_array_mut().unwrap().pop();

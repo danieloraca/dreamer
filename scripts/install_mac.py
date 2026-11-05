@@ -6,6 +6,7 @@ No daemon, scheduled task, GitHub changes, model API or credential copying.
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import stat
 import shutil
@@ -45,7 +46,7 @@ def replace_section(text, start, end, section):
     return text.rstrip() + '\n\n' + section + '\n'
 
 
-def install(home, binary, token_file):
+def install(home, binary, token_file, enable_conversations=False):
     home, binary, token_file = Path(home), Path(binary).resolve(), Path(token_file).resolve()
     metadata = token_file.stat()
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
@@ -78,11 +79,18 @@ def install(home, binary, token_file):
     if settings.exists():
         current = tomllib.loads(settings.read_text())
         # Preserve the user's configured repository, endpoint and credential/cache paths.
-        if not {'repository', 'endpoint', 'writer_token_file', 'cache_dir'} <= set(current) or set(current) - {'repository', 'repositories', 'endpoint', 'writer_token_file', 'cache_dir'}:
+        if not {'repository', 'endpoint', 'writer_token_file', 'cache_dir'} <= set(current) or set(current) - {'repository', 'repositories', 'endpoint', 'writer_token_file', 'cache_dir', 'learn_conversations'}:
             raise RuntimeError('Existing Mac settings need inspection; nothing changed.')
         settings_text = settings.read_text()
         if 'repositories' not in current:
             settings_text = settings_text.rstrip() + '\nrepositories = ' + json.dumps([current['repository']]) + '\n'
+    if enable_conversations:
+        if 'learn_conversations' in tomllib.loads(settings_text):
+            settings_text = re.sub(r'(?m)^\s*learn_conversations\s*=\s*(?:true|false)\s*(?:#.*)?$', 'learn_conversations = true', settings_text)
+        else:
+            settings_text = settings_text.rstrip() + '\nlearn_conversations = true\n'
+        if tomllib.loads(settings_text).get('learn_conversations') is not True:
+            raise RuntimeError('Cannot safely enable conversation setting; nothing changed.')
     table = '\n'.join([CONFIG_START, '[mcp_servers.dreamer_mac]',
         'command = ' + json.dumps(str(installed)),
         'args = ' + json.dumps(['mac', '--settings', str(settings), 'mcp']),
@@ -94,7 +102,8 @@ def install(home, binary, token_file):
         'For planning, implementing, debugging or reviewing a configured Dreamer repository (choose from the configured allowlist), use '
         + str(skill) + '. Read applicable repository instructions and required docs first, then recall knowledge before making code decisions, even when I do not ask. Project guidance governs over memory. '
         'After reading a relevant approved/merged PR for my task, automatically save supported reusable lessons. '
-        'No individual lesson approval is required. Keep scope to the repositories and PRs involved in my work; '
+        'When conversation learning is enabled, also capture supported lessons and corrections from selected chats and completed task turns using the skill’s chat workflow. '
+        'No individual lesson approval is required. Keep scope to the repositories and sources involved in my work; '
         'do not crawl unrelated sources or modify GitHub as part of learning. If memory is unavailable, say so and continue with current source and tests.', END]))
     old_agents = agents.read_text() if agents.exists() else ''
     updated_agents = replace_section(old_agents, START, END, guidance)
@@ -124,9 +133,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--binary', type=Path, default=ROOT / 'target/release/dreamer')
     p.add_argument('--writer-token-file', type=Path, default=ROOT / '.env.writer')
+    p.add_argument('--enable-conversations', action='store_true', help='Enable selected-chat learning; no history crawling.')
     args = p.parse_args()
     try:
-        install(Path.home(), args.binary, args.writer_token_file)
+        install(Path.home(), args.binary, args.writer_token_file, args.enable_conversations)
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
         raise SystemExit('Mac installation stopped; check the binary, private writer file and existing managed configuration. No credentials displayed.') from None
 

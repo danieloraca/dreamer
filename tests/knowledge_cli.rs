@@ -42,7 +42,7 @@ fn local_fixture_can_be_added_searched_and_retrieved_across_cli_processes() {
     let (directory, config) = setup();
     success(run(&config, &["status"]));
     assert!(!directory.path().join("data").exists());
-    assert!(success(run(&config, &["db", "init"])).contains("schema 5"));
+    assert!(success(run(&config, &["db", "init"])).contains("schema 6"));
     assert!(
         success(run(&config, &["lesson", "add", "--file", FIXTURE])).contains("Inserted candidate")
     );
@@ -140,6 +140,7 @@ fn lifecycle_cli_retires_without_losing_evidence_and_replays_the_same_receipt() 
         target_id: None,
         reason: "Synthetic follow-up evidence invalidates the earlier overly broad advice.".into(),
         producer: "fixture".into(),
+        conversation_evidence: vec![],
         evidence: source.evidence.clone(),
     };
     let file = directory.path().join("change.json");

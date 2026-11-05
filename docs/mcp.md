@@ -115,3 +115,12 @@ Reports contain bounded operational metadata only, scoped by the same repository
 allowlist; terminal outcomes cannot be rewritten. See [operations](operations.md)
 for retry, freshness and retention limits. The Mac MCP still exposes seven tools;
 reporting runs inside its learning calls and adds no agent round trip.
+
+## Conversation sources (schema 6)
+
+Writer discovery includes `submit_conversation_candidate`, sharing the candidate
+validation and role/scope boundary. Lessons and lifecycle changes may carry
+`conversation_evidence` alongside `evidence` (PR sources); at least one source is
+required. Read tools return typed citations, and the dashboard displays chat links
+and claim classes. Excerpts remain on the Mac. Mac selected-chat tools and the
+update order are documented in [conversation learning](conversations.md).

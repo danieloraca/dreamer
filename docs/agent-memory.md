@@ -5,7 +5,7 @@ additional repositories. Both Mac and Pi must allow each selected scope.
 
 Dreamer is a tool Codex uses during ordinary work: recall prior lessons before
 coding, and accumulate supported lessons after reading PR feedback and the
-resulting code. No individual lesson approval is required. The existing Codex
+resulting code, plus selected Codex chats when enabled. See [conversation learning](conversations.md) for source guards and rollout. No individual lesson approval is required. The existing Codex
 session performs extraction; no separate model API, model key or background model
 process is needed. The Pi stores and serves knowledge, while GitHub access stays
 on the Mac.

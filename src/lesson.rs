@@ -57,7 +57,10 @@ pub struct Lesson {
     )]
     pub scope: crate::retrieval::LessonScope,
     pub provenance: Provenance,
+    #[serde(default)]
     pub evidence: Vec<Evidence>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conversation_evidence: Vec<crate::conversation::ConversationEvidence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,13 +121,57 @@ impl Lesson {
         if self.provenance.producer.trim().is_empty() {
             return Err("lesson provenance requires a producer");
         }
-        if self.evidence.is_empty()
+        if (self.evidence.is_empty() && self.conversation_evidence.is_empty())
             || self
                 .evidence
                 .iter()
                 .any(|item| item.source_url.trim().is_empty() || item.description.trim().is_empty())
         {
             return Err("a lesson must include source pointers and evidence descriptions");
+        }
+        if self.conversation_evidence.len() > 12 {
+            return Err("at most 12 conversation sources per lesson");
+        }
+        let mut chat_sources = std::collections::BTreeSet::new();
+        for evidence in &self.conversation_evidence {
+            evidence.validate()?;
+            if !chat_sources.insert((
+                &evidence.provider,
+                &evidence.thread_id,
+                &evidence.turn_id,
+                &evidence.item_id,
+            )) {
+                return Err("duplicate conversation source identity");
+            }
+        }
+        if let Some(first) = self.conversation_evidence.first() {
+            use crate::conversation::{ConversationClaim as C, ConversationKind as K};
+            if self
+                .conversation_evidence
+                .iter()
+                .any(|e| e.claim != first.claim)
+            {
+                return Err("one chat lesson must have one claim class");
+            }
+            let supported = match first.claim {
+                C::Decision | C::Correction => self
+                    .conversation_evidence
+                    .iter()
+                    .any(|e| e.kind == K::UserStatement),
+                C::ObservedOutcome => {
+                    self.conversation_evidence.len() >= 2
+                        && self
+                            .conversation_evidence
+                            .iter()
+                            .any(|e| e.kind == K::ObservedResult)
+                }
+                C::Hypothesis => self.summary.starts_with("Hypothesis (unverified): "),
+            };
+            if !supported {
+                return Err(
+                    "chat claim requires user evidence, an inspected result, or an explicit unverified hypothesis label",
+                );
+            }
         }
         for evidence in &self.evidence {
             let pr = &evidence.pull_request;

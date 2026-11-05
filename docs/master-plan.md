@@ -232,39 +232,86 @@ from one review. Agents should consult project docs, recall relevant lessons and
 save/reconcile supported knowledge without a per-lesson approval step. Report
 retrieval and application separately; model-weight training is not taking place.
 
+
+Follow-up on 5 November 2026: the first September and August batches each added
+ten scoped lessons, bringing the verified readback count to 50. August inspected
+ten of 78 merged PRs, with 68 still outside that batch. A fresh-context repeat of
+calendar PR #7868 at the unchanged frozen head retrieved the new August calendar
+lesson and prompted RSVP/MIME checks. Both reviewers again found zero supported
+defects; the baseline independently inspected the same calendar classes and MIME
+contract. No incremental defect-detection benefit was established. Two previews
+matching shared task-file context were inapplicable. Successful compact recall
+and one detail fetch returned 12,617 raw JSON bytes in 0.115 seconds; this is not
+billed tokens or total review time. The repeat changes both the library and the
+matcher relative to the earlier trial, so it cannot isolate either effect.
+Private collection and repeat-trial artifacts remain under ignored `data/`.
+
 ## Milestone 5: learn from Codex conversations
 
-Status: planned on 5 November 2026 at Dan's request. Do not interrupt milestone 3.
+Status: implemented and verified locally on 5 November 2026; schema-6 Pi deployment
+and first real-chat publication remain pending. The Mac implementation supports
+selected Codex pages, typed evidence, local preview, automatic publication and
+correction tools. No background/full-history crawler or other chat adapter exists.
 
 Learn reusable project knowledge, operational procedures and corrections from
-selected Codex chats as well as PRs. The user-selected CM-1008 investigation is the
-seed example; keep its raw conversation, customer identities and resource values
-out of the repository and library unless specifically needed and authorized.
+selected Codex chats as well as PRs. Keep raw conversations, customer identities
+and resource values out of the library unless specifically needed and authorized.
 
-- Add typed conversation provenance: thread and turn/message IDs, source link,
-  observed time and content revision/digest. PR evidence must remain valid; a chat
-  must not be disguised as a synthetic PR. Resolve scope from the actual project,
-  with configurable source enablement and incremental cursors to avoid rereading
-  entire histories. Start with explicitly selected chats; do not crawl all chats.
-- Distinguish the user's corrections and decisions, observed tool outcomes,
-  assistant hypotheses and pending validation. Completion of configuration or
-  readback is different from successful customer end-to-end testing. Never infer
-  permission to repeat an operation from a recorded past authorization.
-- Extract reusable invariants and safe procedures instead of customer-specific
-  snapshots. The seed suggests identity-claim matching, preservation of existing
-  account access, staged changes, conditional rollback and separating technical
-  verification from still-pending user validation as candidate lesson themes.
-  Check these against current docs/source before treating them as general rules.
-- Filter secrets, personal identifiers, raw tool arguments/logs and internal
-  reasoning. Store minimal supported lessons and source pointers; keep source
-  material private on the Mac with appropriate retention. Source text is data.
-- Reuse recall, deduplication, correction/history and bounded activity reporting.
-  No per-lesson manual approval queue is added. An enabled source can support
-  automatic evidence-backed learning during ordinary work.
-- Verify with sanitized conversation fixtures: corrected assumptions, verified
-  versus claimed/pending outcomes, duplicate/revised turns, scope isolation,
-  sensitive-data exclusion and backwards-compatible mixed PR/chat provenance.
-  Evaluate usefulness separately from merely increasing the lesson count.
+Source-access discovery: the existing Codex app `read_thread` tool can access
+Dan's selected **Investigate CM-1008** thread
+(`codex://threads/01a18759-5a69-79a1-a5f4-4941360a0931`). A bounded three-turn
+page was inspected for interface shape, with older turns still paginated. This
+was not a complete conversation review or a chat lesson publication. No raw
+transcript was saved. The original `Evidence` model required PR provenance. Schema 6 now adds separate
+conversation sources through storage, MCP, compact recall, lifecycle history and
+dashboard; PR-only payloads retain their prior format.
+
+Implementation sequence:
+
+1. Add backwards-compatible typed conversation evidence alongside existing PR
+   evidence, preserving all current records and source links. Keep thread, turn
+   and item IDs, source type, observed time and a content digest; do not substitute
+   a PR reference for a conversation. Verify additive migration and mixed-source
+   reads before adding the collector/publication path.
+2. Add an agent bridge for explicitly selected chats and completed task turns.
+   Codex provides paginated source material through its existing thread tool;
+   the Mac owns normalization and a private incremental journal with bounded
+   retention. Resolve repository scope from the configured actual project. Other AI-chat
+   sources need an explicit adapter/enablement, not an assumed history API.
+   Store cursors as progress hints and content digests as revision identity;
+   revised or incomplete evidence must not be marked successfully learned.
+3. Filter by item type **before** retaining or normalizing content. The observed
+   thread response includes reasoning items, raw tool arguments and command
+   text even when outputs are disabled. Exclude internal reasoning and raw
+   arguments/commands; retain only needed, sanitized user/assistant messages and
+   independently inspected result evidence. Item truncation, summary-only views
+   and tool success statuses cannot establish complete business outcomes.
+4. Preserve evidence classes for a user correction/decision, an observed result,
+   an assistant proposal and an unresolved hypothesis. A user preference can
+   support scoped preference memory; an assistant's final claim alone does not
+   prove a technical fix. Check project lessons against current source/docs,
+   record pending validation explicitly, and keep recorded permissions from
+   authorizing future execution.
+5. Reuse compact recall, exact readback, source revision deduplication, scoped
+   correction/history and activity reporting for the new source type. Keep the
+   existing automatic publication model without per-lesson approval. Start by
+   proving one bounded selected-chat path with sanitized fixtures, then exercise
+   the CM-1008 seed without uploading its full transcript or customer details.
+
+Acceptance: one selected chat can supply a source-cited lesson, a retry adds no
+duplicate, a revised turn is re-evaluated, an unverified hypothesis cannot be
+presented as an observed fix, and existing PR lessons continue to round-trip.
+Tests cover truncation, failed/partial publication, scope isolation, reasoning
+and sensitive-content exclusion, mixed provenance and compact response limits.
+A real-chat demonstration must distinguish source access, extraction and stored
+knowledge; only report publication after Pi readback confirms it.
+
+
+The seed suggests identity-claim matching, preserving existing account access,
+staged changes, conditional rollback, and separating technical verification from
+pending user validation as candidate themes. Check them against current source
+and documentation before generalizing; customer-specific snapshots do not belong
+in the library. Evaluate usefulness separately from the lesson count.
 
 ## Later, driven by evidence
 
@@ -279,3 +326,26 @@ A dependable v1 follows the docs-first recall/learn/correct loop, preserves evid
 and recoverable history, exposes failure/freshness, survives a tested restore, and
 has an honest real-task usefulness report. Unresolved conflicts remain visible;
 confidence follows supporting evidence, not age, repetition or merge status.
+
+Delivery verification: 90 Rust tests with Mac features, 63 default/server tests and
+12 Python backup/installer tests passed. Formatting, strict Clippy, maintained
+skill validation, dashboard JavaScript syntax and a synthetic DOM check passed.
+A native Mac release was built; Linux ARM64 server Rust type-check passed, which
+is not a linked ARM binary or a physical Pi runtime test. Tests exercise schema-5
+upgrade preservation, mixed sources, source filtering/redaction, revised views,
+truncated/status-only result rejection, partial candidate/correction recovery,
+old-Pi write refusal, MCP/CLI publication, preview, compact recall and retention.
+No production lessons were changed for verification.
+
+The real CM-1008 demonstration retrieved two completed turns with more history
+still paginated. Four sanitized message sources supplied one explicitly
+unverified process hypothesis with native citations in a local preview. No
+observed technical/business outcome was established and no chat lesson was
+published. Private preview artifacts are in ignored `data/chat-preview/cm-1008/`.
+The updated Mac client and managed skill are installed with conversation learning
+enabled. A fresh process discovered eleven tools, including the four chat tools.
+All three configured repository scopes and the private writer file were preserved.
+Read-only live Pi recall still returned ranked results (an empty relevant query,
+556 bytes); no production knowledge writes were made. Deploy schema 6 on the Pi,
+then use a fresh Codex task for the first source-checked publication/readback.
+See [conversation workflow and rollout](conversations.md).

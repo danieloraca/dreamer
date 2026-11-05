@@ -3,13 +3,13 @@
 One crate keeps the initial project easy to navigate. The SQLite adapter implements
 the storage port. CLI, stdio MCP, authenticated HTTP MCP and the read-only dashboard share it. The optional
 Pi installer provides an always-on systemd service; collection/refinement stays
-on the Mac. Optional Mac MCP tools let the coding agent recall, inspect PR evidence
+on the Mac. Optional Mac MCP tools let the coding agent recall, inspect PR/chat evidence
 and automatically remember supported lessons; `collect` retains its dry-run mode.
 
 Proposed flow:
 
 ```text
-Mac agent: recall → read PR evidence → extract lessons → MCP write
+Mac agent: recall → read PR/chat evidence → extract lessons → MCP write
                                                           ↓
 Pi:                                              SQLite knowledge library
                                                           ↓
@@ -87,4 +87,9 @@ No database migration is needed. See [configuration and rollout](repositories.md
 - The Pi template follows SymNotes private LAN/Tailscale HTTP access. Add TLS for
   untrusted networks. Tokens are generated on the Pi and never committed or logged.
 
-Only synthetic PR evidence and lessons are included in this repository.
+Schema 6 adds separate ordered `conversation_evidence` rows and optional chat sources
+in lesson/lifecycle JSON. Existing PR payloads remain unchanged. Sanitized excerpts
+and incremental receipts stay on the Mac; only lessons and typed citations reach
+the Pi. See [selected-chat learning](conversations.md).
+
+Only synthetic PR/chat evidence and lessons are included in this repository.

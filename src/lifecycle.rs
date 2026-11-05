@@ -31,14 +31,17 @@ pub struct LessonChange {
     pub reason: String,
     /// Asserted producer, not an authenticated identity or verification claim.
     pub producer: String,
+    #[serde(default)]
     pub evidence: Vec<Evidence>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conversation_evidence: Vec<crate::conversation::ConversationEvidence>,
 }
 impl LessonChange {
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.source_id.len() > 1000
             || !(15..=2000).contains(&self.reason.trim().len())
             || !(1..=500).contains(&self.producer.trim().len())
-            || !(1..=12).contains(&self.evidence.len())
+            || !(1..=12).contains(&(self.evidence.len() + self.conversation_evidence.len()))
         {
             return Err(
                 "change needs bounded identity, reason, producer and 1–12 evidence sources",
@@ -69,6 +72,7 @@ impl LessonChange {
                 method: ExtractionMethod::Manual,
             },
             evidence: self.evidence.clone(),
+            conversation_evidence: self.conversation_evidence.clone(),
         }
         .validate_candidate()
     }

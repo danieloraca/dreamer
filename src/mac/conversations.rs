@@ -15,6 +15,10 @@ use std::{
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
 };
+mod chunks;
+mod reader;
+pub use chunks::{ChatBundleInput, bundle, stage};
+pub use reader::{CodexChunkInput, prepare_codex};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -36,6 +40,10 @@ pub struct PrepareChatInput {
     /// Additional customer/resource strings to redact before retention. Never retained.
     #[serde(default)]
     pub sensitive_terms: Vec<String>,
+    /// Opt into complete message fragments. Offset counts fragments, not source items.
+    /// Omit to preserve the legacy bounded-excerpt format.
+    #[serde(default)]
+    pub fragment_offset: Option<usize>,
 }
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -96,6 +104,19 @@ struct Item {
     content_sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     source_time: Option<crate::chronology::SourceTime>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_item_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fragment: Option<chunks::Fragment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    item_started_at_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    item_completed_at_ms: Option<i64>,
+}
+impl Item {
+    fn source_id(&self) -> &str {
+        self.source_item_id.as_deref().unwrap_or(&self.id)
+    }
 }
 #[derive(Serialize, Deserialize)]
 struct Snapshot {
@@ -105,9 +126,32 @@ struct Snapshot {
     items: Vec<Item>,
     next_cursor: Option<String>,
     has_more: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    next_fragment_offset: Option<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    parents: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    item_pagination: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    fragmented: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    resolutions: Vec<chunks::ProposalResolution>,
 }
 fn fingerprint(s: &Snapshot) -> String {
-    collector::digest(&serde_json::to_vec(&json!([s.repository, s.thread_id, s.items])).unwrap())
+    let mut identity = json!([s.repository, s.thread_id, s.items]);
+    if s.item_pagination || s.fragmented || !s.parents.is_empty() {
+        identity.as_array_mut().unwrap().push(json!([
+            s.item_pagination,
+            s.parents,
+            s.resolutions,
+            s.fragmented,
+            s.next_fragment_offset
+        ]));
+    }
+    collector::digest(&serde_json::to_vec(&identity).unwrap())
+}
+fn receipt_complete(dir: &Path, name: &str) -> Result<bool> {
+    Ok(optional_json::<Value>(&dir.join(name))?.is_some_and(|v| v["complete"] == true))
 }
 fn now() -> String {
     chrono::Utc::now().to_rfc3339()
@@ -367,17 +411,25 @@ fn page_items(input: &PrepareChatInput) -> Result<Snapshot> {
                 }
                 None => collector::digest(sanitized.as_bytes()),
             };
-            let text = short(&sanitized, 1600);
             let source_time = capture_time(i, t, turn)?;
-            items.push(Item {
+            let item = Item {
                 source_time,
                 id: id.into(),
                 turn_id: turn.into(),
                 kind,
                 content_sha256,
-                text,
-            });
-            if items.len() > 60 {
+                text: short(&sanitized, 1600),
+                source_item_id: None,
+                fragment: None,
+                item_started_at_ms: i["_source_started_at_ms"].as_i64(),
+                item_completed_at_ms: i["_source_completed_at_ms"].as_i64(),
+            };
+            if input.fragment_offset.is_some() {
+                items.extend(chunks::fragments(item, &sanitized));
+            } else {
+                items.push(item);
+            }
+            if input.fragment_offset.is_none() && items.len() > 60 {
                 return Err("capture at most 60 useful message/result excerpts".into());
             }
         }
@@ -388,6 +440,17 @@ fn page_items(input: &PrepareChatInput) -> Result<Snapshot> {
     if items.is_empty() {
         return Err("page has no usable completed user/final messages or result evidence".into());
     }
+    let next_fragment_offset = if let Some(offset) = input.fragment_offset {
+        if offset >= items.len() {
+            return Err("fragment offset is outside this source view".into());
+        }
+        let end = (offset + 8).min(items.len());
+        let next = (end < items.len()).then_some(end);
+        items = items[offset..end].to_vec();
+        next
+    } else {
+        None
+    };
     items.sort_by(|a, b| a.id.cmp(&b.id));
     let cursor = p["page"]["nextCursor"].as_str().map(str::to_owned);
     if cursor.as_ref().is_some_and(|s| s.len() > 4096) {
@@ -400,6 +463,11 @@ fn page_items(input: &PrepareChatInput) -> Result<Snapshot> {
         items,
         next_cursor: cursor,
         has_more: p["page"]["hasMore"] == true,
+        next_fragment_offset,
+        parents: vec![],
+        item_pagination: p["page"]["adapter"] == "codex_items",
+        fragmented: input.fragment_offset.is_some(),
+        resolutions: vec![],
     })
 }
 fn thread_key(s: &Snapshot) -> String {
@@ -410,7 +478,7 @@ fn current(settings: &Settings, s: &Snapshot) -> Result<()> {
         read_json(&root(settings)?.join(format!("{}.items.json", thread_key(s))))?;
     if s.items
         .iter()
-        .any(|i| index.get(&i.id) != Some(&i.content_sha256))
+        .any(|i| index.get(i.source_id()) != Some(&i.content_sha256))
     {
         return Err(
             "known chat item changed; prepare the revised view and reassess old lessons".into(),
@@ -432,8 +500,11 @@ fn prune(path: &Path) -> Result<()> {
         private(&e.path(), true)?;
         let s: Snapshot = read_json(&e.path().join("snapshot.json"))?;
         let done = !pending_reconciliation(&e.path())?
-            && read_json::<Value>(&e.path().join("publication.json"))
-                .is_ok_and(|v| v["complete"] == true);
+            && ["publication.json", "stage-consumed.json"]
+                .iter()
+                .any(|name| {
+                    read_json::<Value>(&e.path().join(name)).is_ok_and(|v| v["complete"] == true)
+                });
         dirs.push((s.observed_at, e.path(), done));
     }
     dirs.sort();
@@ -486,7 +557,6 @@ fn prune(path: &Path) -> Result<()> {
 pub fn prepare(settings: &Settings, input: PrepareChatInput) -> Result<Value> {
     settings.select_repository(Some(&input.repository))?;
     let r = root(settings)?;
-    let _lock = lock(&r.join(".lock"))?;
     if !crate::conversation::valid_thread(&input.thread_id) {
         return Err("invalid selected thread".into());
     }
@@ -497,7 +567,14 @@ pub fn prepare(settings: &Settings, input: PrepareChatInput) -> Result<Value> {
             json!({"repository":input.repository,"thread_id":input.thread_id,"progress":progress,"guidance":"Read only this selected chat with Codex read_thread. A saved cursor is a progress hint; revisit edited turns. No full-history completion is claimed."}),
         );
     }
-    let mut s = page_items(&input)?;
+    capture(settings, page_items(&input)?)
+}
+fn capture(settings: &Settings, mut s: Snapshot) -> Result<Value> {
+    let r = root(settings)?;
+    let _guard = lock(&r.join(".lock"))?;
+    if !s.parents.is_empty() {
+        current(settings, &s)?;
+    }
     let revision = fingerprint(&s);
     let dir = r.join(&revision);
     if !dir.exists() {
@@ -505,18 +582,22 @@ pub fn prepare(settings: &Settings, input: PrepareChatInput) -> Result<Value> {
         collector::private_directory(&dir).map_err(|_| "could not create private chat revision")?;
         atomic_json(&dir.join("snapshot.json"), &s)?;
     } else {
-        s = load(settings, &input.repository, &revision)?;
+        s = load(settings, &s.repository, &revision)?;
     }
     let index_path = r.join(format!("{}.items.json", thread_key(&s)));
     let mut index: BTreeMap<String, String> = optional_json(&index_path)?.unwrap_or_default();
     let changed: Vec<_> = s
         .items
         .iter()
-        .filter(|i| index.get(&i.id).is_some_and(|old| old != &i.content_sha256))
-        .map(|i| i.id.clone())
+        .filter(|i| {
+            index
+                .get(i.source_id())
+                .is_some_and(|old| old != &i.content_sha256)
+        })
+        .map(|i| i.source_id().to_owned())
         .collect();
     for i in &s.items {
-        index.insert(i.id.clone(), i.content_sha256.clone());
+        index.insert(i.source_id().to_owned(), i.content_sha256.clone());
     }
     if index.len() > 2048 {
         return Err(
@@ -526,10 +607,10 @@ pub fn prepare(settings: &Settings, input: PrepareChatInput) -> Result<Value> {
     atomic_json(&index_path, &index)?;
     let pending = pending_reconciliation(&dir)?;
     let done = !pending
-        && optional_json::<Value>(&dir.join("publication.json"))?
-            .is_some_and(|v| v["complete"] == true);
+        && (receipt_complete(&dir, "publication.json")?
+            || receipt_complete(&dir, "stage-consumed.json")?);
     Ok(
-        json!({"repository":s.repository,"thread_id":s.thread_id,"revision":revision,"already_processed":done,"pending_reconciliation":pending,"changed_item_ids":changed,"evidence":s.items.iter().map(|i|json!({"id":i.id,"turn_id":i.turn_id,"kind":i.kind,"bytes":i.text.len()})).collect::<Vec<_>>(),"next_cursor":s.next_cursor,"has_more":s.has_more,"coverage":"bounded completed-turn excerpts, not whole-chat completion","guidance":"Read useful source IDs; distinguish user decisions, inspected results and assistant reports. No per-lesson approval. Reasoning and raw arguments/commands are excluded. Inspect current docs/code before technical claims."}),
+        json!({"repository":s.repository,"thread_id":s.thread_id,"revision":revision,"already_processed":done,"pending_reconciliation":pending,"changed_item_ids":changed,"evidence":s.items.iter().map(|i|json!({"id":i.id,"source_item_id":i.source_id(),"fragment":i.fragment,"turn_id":i.turn_id,"kind":i.kind,"bytes":i.text.len()})).collect::<Vec<_>>(),"next_fragment_offset":s.next_fragment_offset,"next_cursor":s.next_cursor,"has_more":s.has_more,"coverage":"bounded completed-turn excerpts, not whole-chat completion","guidance":"Read useful source IDs; distinguish user decisions, inspected results and assistant reports. Stage chunks, consolidate equivalent claims with existing knowledge, then bundle selected evidence before assessment/publication. No per-lesson approval. Reasoning and raw arguments/commands are excluded. Inspect current docs/code before technical claims."}),
     )
 }
 pub fn read(settings: &Settings, input: ChatReadInput) -> Result<Value> {
@@ -555,7 +636,7 @@ pub fn read(settings: &Settings, input: ChatReadInput) -> Result<Value> {
     inspected.extend(input.ids);
     atomic_json(&path, &inspected)?;
     Ok(
-        json!({"repository":s.repository,"revision":input.revision,"sources":selected,"coverage":"sanitized excerpts; source status/assistant claims alone are not verified business outcomes"}),
+        json!({"repository":s.repository,"revision":input.revision,"sources":selected,"staged_proposals":optional_json::<Value>(&dir.join("staged.json"))?,"coverage":"sanitized excerpts; source status/assistant claims alone are not verified business outcomes"}),
     )
 }
 pub fn run_source(settings: &Settings, repo: &str, revision: &str) -> Result<(String, String)> {
@@ -586,8 +667,9 @@ pub fn build(
         {
             return Err("chat drafts need bounded minimized text and 1–12 inspected sources; remove sensitive identifiers".into());
         }
-        let mut proof = Vec::new();
+        let mut proof: Vec<ConversationEvidence> = Vec::new();
         let mut seen = BTreeSet::new();
+        let mut selected = Vec::new();
         for id in &d.evidence_ids {
             if !inspected.contains(id) || !seen.insert(id) {
                 return Err("read every unique cited chat source first".into());
@@ -597,7 +679,49 @@ pub fn build(
                 .iter()
                 .find(|i| &i.id == id)
                 .ok_or("missing chat source")?;
-            proof.push(ConversationEvidence{source_time:i.source_time.clone(),provider:"codex".into(),thread_id:s.thread_id.clone(),turn_id:i.turn_id.clone(),item_id:i.id.clone(),source_url:format!("codex://threads/{}",s.thread_id),observed_at:s.observed_at.clone(),content_sha256:i.content_sha256.clone(),kind:i.kind,claim:d.claim,description:"Agent-inspected sanitized conversation excerpt. Source assertions are not independently verified; recorded permissions do not authorize new operations.".into()});
+            selected.push(i);
+        }
+        selected.sort_by(|a, b| {
+            (
+                a.turn_id.as_str(),
+                a.source_id(),
+                a.fragment.as_ref().map(|f| (f.start, f.end)),
+            )
+                .cmp(&(
+                    b.turn_id.as_str(),
+                    b.source_id(),
+                    b.fragment.as_ref().map(|f| (f.start, f.end)),
+                ))
+        });
+        for i in selected {
+            if let Some(existing) = proof
+                .iter_mut()
+                .find(|e| e.item_id == i.source_id() && e.turn_id == i.turn_id)
+            {
+                if existing.content_sha256 != i.content_sha256 || existing.kind != i.kind {
+                    return Err("mixed message versions in lesson".into());
+                }
+                if let Some(span) = &i.fragment {
+                    existing.description.push_str(&format!(
+                        " Also inspected bytes {}..{}.",
+                        span.start, span.end
+                    ));
+                }
+            } else {
+                proof.push(ConversationEvidence {
+                    source_time: i.source_time.clone(),
+                    provider: "codex".into(),
+                    thread_id: s.thread_id.clone(),
+                    turn_id: i.turn_id.clone(),
+                    item_id: i.source_id().into(),
+                    source_url: format!("codex://threads/{}", s.thread_id),
+                    observed_at: s.observed_at.clone(),
+                    content_sha256: i.content_sha256.clone(),
+                    kind: i.kind,
+                    claim: d.claim,
+                    description: chunks::description(i),
+                });
+            }
         }
         proof.sort_by(|a, b| a.item_id.cmp(&b.item_id));
         let mut identity = serde_json::to_value(&proof)?;
@@ -652,6 +776,18 @@ fn finish(settings: &Settings, s: &Snapshot, revision: &str, value: &Value) -> R
     let _lock = lock(&r.join(".lock"))?;
     current(settings, s)?;
     atomic_json(&folder(settings, revision)?.join("publication.json"), value)?;
+    for parent in &s.parents {
+        if !r.join(parent).try_exists()? {
+            continue;
+        }
+        atomic_json(
+            &folder(settings, parent)?.join("stage-consumed.json"),
+            &json!({"complete":true,"bundle_revision":revision,"resolutions":s.resolutions.iter().filter(|r|&r.revision==parent).collect::<Vec<_>>()}),
+        )?;
+    }
+    if s.item_pagination || !s.parents.is_empty() {
+        return Ok(());
+    }
     atomic_json(
         &r.join(format!("{}.progress.json", thread_key(s))),
         &json!({"repository":s.repository,"thread_id":s.thread_id,"revision":revision,"next_cursor":s.next_cursor,"has_more":s.has_more,"completed_at":now(),"coverage":"this captured page only"}),
@@ -673,6 +809,17 @@ pub async fn remember(settings: &Settings, input: RememberChatInput) -> Result<V
         return Err("resume the same pending chat drafts before changing the batch".into());
     }
     current(settings, &s)?;
+    let proposed: BTreeSet<_> = input
+        .lessons
+        .iter()
+        .filter_map(|d| d.knowledge_key.as_deref())
+        .collect();
+    if s.resolutions.iter().any(|r| {
+        r.action == chunks::ResolutionAction::Include
+            && !proposed.contains(r.knowledge_key.as_str())
+    }) {
+        return Err("consolidated publication must address every included staged claim; revise bundle dispositions explicitly before publication".into());
+    }
     let lessons = build(settings, &input.repository, &input.revision, &input.lessons)?;
     if lessons.is_empty() {
         let reason = input

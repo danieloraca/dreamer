@@ -106,3 +106,96 @@ trial into its results. Conversation learning remains the separate milestone 5.
 Private raw code, discussions, immutable reviewer reports, hashes, retrieval
 outputs and learning receipts are retained locally under `data/daily-trial-2026-11-05/`.
 They are ignored by Git. This report contains the shareable aggregate result.
+
+## Measured cost pilot: 5 November 2026
+
+Six fresh, ephemeral Codex reviews compared three frozen PRs, with and without
+bounded Dreamer context. The requested model (`gpt-6.1-sol`), high reasoning
+effort, project guidance, base/head commits, output schema and review limits
+were identical. Order alternated by pair. All runs completed within six shell
+invocations and 240 seconds. Inputs and original reports were hashed before
+adjudication. The library was frozen at 58 lessons; no selected PR was a source.
+
+These are observed results, not established Dreamer-caused savings:
+
+| Total across three PRs | Baseline | Dreamer | Change |
+| --- | ---: | ---: | ---: |
+| Agent review time, including retrieval | 316.55 s | 287.73 s | -9.10% |
+| Input plus output tokens | 859,166 | 794,871 | -7.48% |
+| Cached input tokens, already included above | 675,712 | 615,552 | -8.90% |
+| Uncached input tokens | 173,123 | 168,638 | -2.59% |
+| Output tokens | 10,331 | 10,681 | +3.39% |
+| Confirmed reported defects | 1 | 1 | Same root cause |
+
+PR #7865 used 8.53% less elapsed time and 18.47% fewer total tokens with Dreamer.
+PR #7858 used 0.33% more time and 1.64% more tokens. PR #7839 used 19.49% less
+time and 4.41% fewer tokens. The largest time reduction occurred on a task that
+rejected every lesson, so ordinary model/tool-strategy variation remains a
+credible explanation. One run per arm on three purposively selected tasks does
+not establish a general improvement, statistical significance or causation.
+
+Both reviewers found the same newly added CI test contradicting the effective
+empty TLS options in #7865. The coordinator reproduced its exact
+`Unexpected TLS options for production/tenant` failure using pinned files in a
+disposable fixture on PHP 8.4.23 with `pdo_mysql`. No framework, database or cloud
+service was accessed. Both CI matrix versions were not executed. Neither arm
+reported an unsupported finding; zero migration findings do not prove absence
+of bugs or equal review sensitivity. No incremental defect-detection benefit
+was established.
+
+Three real compact recalls and one full fetch supplied frozen context to the
+assisted prompts: 0.539 seconds and 22,477 returned bytes. Six migration previews
+were rejected as inapplicable; one full TLS lesson was used, and two additional
+TLS previews were not applied. This isolates the supplied context contribution,
+not live MCP schema/discovery/tool-selection overhead. PR descriptions,
+tickets and discussions were withheld from the timed task inputs. Current docs
+and current knowledge were used, not a chronological backtest. The baseline
+reported a missing linked verification reference, and the final assisted review
+reported a denied byte comparison; those incidental frictions remain included
+and cannot be credited to Dreamer. Coordinator hash checks verified the inputs.
+
+The completed CLI turns supplied actual input, cached-input and output counts;
+these were not estimated from bytes. Cached input is a subset, not another
+token charge to add. Roughly 80% of baseline input and 78% of assisted input was
+cached, so the total-token percentage is not a billing percentage. No monetary
+charge was measured. Agent latency excludes human work, cohort preparation,
+orchestration, adjudication, collection/consolidation and live MCP overhead.
+The six review runs consumed 1,633,025 input tokens (1,291,264 cached) and
+21,012 output tokens, plus a separate 17,960-input/five-output capability check;
+parent setup/adjudication usage is unavailable. No net workflow saving or
+break-even claim follows from these figures.
+
+### Repeating a measurement
+
+The manual Mac runner requires the existing Codex CLI/login and explicit model
+and reasoning-effort settings. Put the frozen task, governing guidance, pinned
+source identities and any selected knowledge in the prompt. It intentionally
+disables automatic user-config MCP startup and memory for controlled inputs;
+ordinary Codex tasks retain their existing configuration. Use a fresh output
+directory; previous results are never overwritten:
+
+```sh
+python3 scripts/measure_review.py \
+  --prompt /path/to/frozen-prompt.txt \
+  --output data/review-measurements/new-run \
+  --schema fixtures/review-result.schema.json
+```
+
+The runner saves the final answer and usage/time metadata without retaining raw
+reasoning, event transcripts, tool arguments or stderr. Failed/timed-out runs or
+missing usage remain incomplete, not zero-cost successes. Six new parser tests
+and the existing Python suite passed (18 tests); nine private measurement/math
+tests passed. Quality still needs source-based adjudication before comparing
+useful cost. No Rust/Pi service change or deployment is involved.
+
+Private protocol, pinned inputs, original reports, metrics, hashes and the
+reproduction: `data/review-cost-trial-2026-11-05/`. Post-trial learning is separate:
+all three approved PRs were captured only after reports were frozen; two received
+specific no-new-lesson receipts, and one source-backed appointment-identity
+uniqueness lesson was added and read back. The live library then became 59; it
+did not contribute to the frozen trial. Do not reuse that new library while
+calling #7839 an unlearned holdout.
+
+The evidence supports measuring ordinary tasks next and reducing irrelevant
+context, especially external SSO matches during database-migration work. Repeating
+every normal task in two arms would itself add substantial cost.

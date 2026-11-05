@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "findings", "checks", "knowledge_use", "limitations"],
+  "properties": {
+    "verdict": {"type": "string"},
+    "findings": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["title", "priority", "path", "line", "scenario", "reason"], "properties": {"title": {"type": "string"}, "priority": {"type": "string"}, "path": {"type": "string"}, "line": {"type": "integer"}, "scenario": {"type": "string"}, "reason": {"type": "string"}}}},
+    "checks": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["area", "files", "basis", "result"], "properties": {"area": {"type": "string"}, "files": {"type": "array", "items": {"type": "string"}}, "basis": {"type": "string"}, "result": {"type": "string"}}}},
+    "knowledge_use": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["lesson_id", "disposition", "reason"], "properties": {"lesson_id": {"type": "string"}, "disposition": {"type": "string"}, "reason": {"type": "string"}}}},
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  }
+}

@@ -114,7 +114,7 @@ weights changed or that lessons guarantee correct code.
 Learning activity reporting is best effort inside these tools; it needs no extra
 agent call. `activity_reporting: queued|unavailable` does not negate a successful
 lesson write. On a failed batch, report partial/unknown outcomes and use the
-existing resume/readback workflow; do not assume rollback. Selected-chat learning uses the workflow below and requires the schema-6 Pi.
+existing resume/readback workflow; do not assume rollback. Selected-chat learning uses the workflow below and requires the schema-7 Pi.
 
 ## Learn from selected Codex conversations
 
@@ -123,6 +123,51 @@ and outcomes from the selected chat or completed task turns. This is on demand;
 do not crawl other history. Confirm the affected configured repository from the
 actual task and keep each lesson scoped to that repository. If thread access is
 unavailable, report that limit; do not reconstruct missing source IDs or outcomes.
+
+Prefer `prepare_codex_chat_learning` with the selected `repository`, `thread_id`
+and necessary `sensitive_terms`. The Mac reads that one thread through Codex's
+metadata and item-pagination APIs; it never resumes the conversation, invokes a
+model, migrates history or falls back to raw session files. Stop on unavailable
+source access or unsupported pagination. Do not widen the allowlist to fit a chat.
+The tool exposes bounded fragments, original message identities, original time
+basis, progress and optional adjacent-context references. Read useful IDs with
+`read_chat_evidence`. Caller redaction remains necessary; automatic filtering is
+heuristic and does not recognize every person or customer/resource identifier.
+
+For long chats, use this bounded automatic-agent workflow:
+
+1. Read the chunk and relevant adjacent context. Propose at most three scoped
+   lessons using `stage_chat_lessons`, or give a specific no-new-knowledge reason.
+   Staging is local and does not publish knowledge. Staged proposals are immutable;
+   revise conclusions through explicit consolidation rather than replacing receipts.
+2. Continue reading, staging at most twelve chunks per window. `status_only`
+   returns local progress and compact draft previews. A pending unstaged chunk is
+   returned again; failed publication/corrections cannot be bypassed. Chunk overlap
+   supplies context, not independent corroboration or permission.
+3. Consolidate equivalent claim/applicability keys against stored knowledge. Use
+   `bundle_chat_evidence` with the staged revisions, selected original evidence
+   IDs and an explicit include/skip resolution (revision, knowledge_key, action,
+   reason) for every staged proposal. Include a proposal's sources when including
+   its claim. Edited/stale views may only be explicitly skipped without citations.
+   An all-skip bundle may have no evidence IDs; it cannot support a new lesson.
+4. Identical current sources already delivered inherit their inspection markers;
+   read any remaining sources or lost context. Full staged drafts are available
+   with a revision's `read_chat_evidence` response. Consolidate first, then use the
+   existing assessment/publication steps below. Every included staged claim must
+   be addressed. Only successful final publication/skip consumes the parent stages.
+5. Finish each window before the bounded cache fills. `source_exhausted` describes
+   traversal, not publication, verification or future edits. Revisit appended or
+   edited conversation history explicitly with `restart`; no background crawler
+   exists. Preserve source dates and all chronology safeguards below.
+
+Long messages use deterministic overlapping UTF-8 fragments. Citations keep the
+actual source message ID and full minimized-view digest; byte ranges describe
+which portions were inspected. Different fragments are not edits of that message.
+A different redacted view is not proof that the original source was edited. Never
+invent source IDs, timestamps or complete-result claims. The item reader does not
+automatically verify tool outcomes; assistant reports remain hypotheses.
+
+For an already selected bounded page, or when using the legacy bridge:
 
 Use Codex `read_thread` for a small page of the selected thread. Before passing
 its decoded JSON to `prepare_chat_learning`, discard reasoning, commentary,

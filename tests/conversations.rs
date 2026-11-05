@@ -195,7 +195,7 @@ mod mac {
         }
     }
     fn input() -> PrepareChatInput {
-        PrepareChatInput{repository:REPO.into(),thread_id:THREAD.into(),page:Some(serde_json::from_str(include_str!("../fixtures/codex-conversation.json")).unwrap()),observations:vec![Observation{item_id:"tool-1".into(),text:"The inspected configuration readback matches; customer acceptance has not been tested.".into()}],sensitive_terms:vec!["Customer Alpha".into()]}
+        PrepareChatInput{repository:REPO.into(),thread_id:THREAD.into(),page:Some(serde_json::from_str(include_str!("../fixtures/codex-conversation.json")).unwrap()),observations:vec![Observation{item_id:"tool-1".into(),text:"The inspected configuration readback matches; customer acceptance has not been tested.".into()}],sensitive_terms:vec!["Customer Alpha".into()],fragment_offset:None}
     }
     fn read(s: &Settings, v: &Value) {
         conversations::read(
@@ -351,6 +351,99 @@ mod mac {
                 .unwrap();
         });
         (stop, task, db)
+    }
+    #[tokio::test]
+    async fn fragment_bundles_publish_original_identity_and_retry_without_duplicates() {
+        use conversations::{ChatBundleInput, bundle, stage};
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = settings(dir.path());
+        let (stop, task, db) = backend(&mut s, dir.path()).await;
+        let mut source = input();
+        source.observations.clear();
+        source.fragment_offset = Some(0);
+        source.page.as_mut().unwrap()["turns"][0]["items"] = json!([{"id":"original-message","type":"agentMessage","phase":"final_answer","text":format!("{} Last corrective detail.","Synthetic engineering context. ".repeat(180))}]);
+        let captured = conversations::prepare(&s, source).unwrap();
+        let revision = captured["revision"].as_str().unwrap();
+        let ids: Vec<String> = captured["evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["id"].as_str().unwrap().into())
+            .collect();
+        conversations::read(
+            &s,
+            ChatReadInput {
+                repository: REPO.into(),
+                revision: revision.into(),
+                ids: ids.clone(),
+            },
+        )
+        .unwrap();
+        stage(
+            &s,
+            RememberChatInput {
+                repository: REPO.into(),
+                revision: revision.into(),
+                lessons: vec![],
+                skip_reason: Some(
+                    "Consolidate this context before deriving a complete supported claim.".into(),
+                ),
+            },
+        )
+        .unwrap();
+        let input = ChatBundleInput {
+            repository: REPO.into(),
+            thread_id: THREAD.into(),
+            revisions: vec![revision.into()],
+            evidence_ids: vec![ids[0].clone(), ids[1].clone()],
+            resolutions: vec![],
+        };
+        let bundled = bundle(&s, input).unwrap();
+        let revision = bundled["revision"].as_str().unwrap();
+        let mut d = draft();
+        d.claim = ConversationClaim::Hypothesis;
+        d.summary="Hypothesis (unverified): Preserve original identity when combining inspected source fragments.".into();
+        d.evidence_ids = vec![ids[0].clone(), ids[1].clone()];
+        // Delivered identical sources inherit inspection; the bundle need not resend the text.
+        let expected = conversations::build(&s, REPO, revision, &[d.clone()])
+            .unwrap()
+            .remove(0);
+        assert_eq!(expected.conversation_evidence.len(), 1);
+        assert_eq!(
+            expected.conversation_evidence[0].item_id,
+            "original-message"
+        );
+        let request = RememberChatInput {
+            repository: REPO.into(),
+            revision: revision.into(),
+            lessons: vec![d.clone()],
+            skip_reason: None,
+        };
+        let first = conversations::remember(&s, request).await.unwrap();
+        assert_eq!(first["outcomes"][0]["outcome"], "inserted");
+        let retry = conversations::remember(
+            &s,
+            RememberChatInput {
+                repository: REPO.into(),
+                revision: revision.into(),
+                lessons: vec![d],
+                skip_reason: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(retry["outcomes"][0]["outcome"], "already_known");
+        assert_eq!(
+            SqliteStore::open_read_only(&db)
+                .unwrap()
+                .get(REPO, &expected.id)
+                .unwrap()
+                .unwrap()
+                .lesson,
+            expected
+        );
+        stop.cancel();
+        task.await.unwrap();
     }
     #[tokio::test]
     async fn actual_http_path_publishes_deduplicates_and_corrects_chat_knowledge() {

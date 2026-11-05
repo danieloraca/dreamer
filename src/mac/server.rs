@@ -35,6 +35,21 @@ impl MacMcp {
             settings: Arc::new(settings),
             gate: Arc::new(tokio::sync::Mutex::new(())),
             tools: vec![
+                crate::mcp::definition::<conversations::CodexChunkInput>(
+                    "prepare_codex_chat_learning",
+                    "Read one resumable chunk of a selected Codex thread through metadata and item pagination, without raw session-file access or resuming it. Completed user/final messages only. Preserves full message digests and original IDs, with bounded overlapping fragments. Supply sensitive_terms before retention. Read/stage a chunk, consolidate bounded windows against existing knowledge, bundle evidence, then assess/publish. status_only reads local progress. Requires enabled conversations and installed Codex CLI; no model call or crawler.",
+                    true,
+                ),
+                crate::mcp::definition::<conversations::RememberChatInput>(
+                    "stage_chat_lessons",
+                    "Stage up to three inspected proposals or a specific no-new-knowledge reason locally. Does not publish Pi knowledge. Provides resume progress without promoting partial context. Consolidate equivalent claims and check existing knowledge, then bundle selected source revisions for normal assessment/publication.",
+                    false,
+                ),
+                crate::mcp::definition::<conversations::ChatBundleInput>(
+                    "bundle_chat_evidence",
+                    "Combine selected original evidence from up to twelve staged revisions of one selected repository/thread, preserving original message identity and digest. Rejects edited/stale sources. Read bundle IDs and consolidate drafts before ordinary assess_chat_lessons/remember_chat_lessons. Bundles are evidence windows, not whole-chat completion.",
+                    true,
+                ),
                 crate::mcp::definition::<conversations::RememberChatInput>(
                     "assess_chat_lessons",
                     "Compare inspected drafts with active same-key knowledge before publication. Returns source-time relations, full related lessons and assessment tokens. Assess every related lesson as consistent, historical, conflict or correction; dates alone do not settle truth.",
@@ -140,6 +155,9 @@ impl ServerHandler for MacMcp {
         let activity_settings = settings.clone();
         let result: Result<Value> = super::activity::track(&activity_settings,request.name.as_ref(),&activity_input,async {
             match request.name.as_ref() {
+                "prepare_codex_chat_learning" => conversations::prepare_codex(&settings,parse(value)?).await,
+                "stage_chat_lessons" => conversations::stage(&settings,parse(value)?),
+                "bundle_chat_evidence" => conversations::bundle(&settings,parse(value)?),
                 "assess_chat_lessons" => conversations::assess_lessons(&settings,parse(value)?).await,
                 "reconcile_chat_lessons" => conversations::reconcile(&settings,parse(value)?).await,
                 "prepare_chat_learning" => {let input=parse::<conversations::PrepareChatInput>(value)?;tokio::task::spawn_blocking(move ||conversations::prepare(&settings,input)).await?}

@@ -204,8 +204,9 @@ Implementation decisions and acceptance criteria:
 
 ## Milestone 4: demonstrate useful daily behavior
 
-Status: initial paired trial completed on 5 November 2026; ongoing real-task
-usefulness remains to be established. See [the trial report](evaluation.md).
+Status: initial paired trial and instrumented cost pilot completed on 5 November
+2026; causal real-task usefulness and net workflow savings remain to be
+established. See [the evaluation report](evaluation.md).
 
 Two fresh isolated same-model contexts reviewed declared unlearned PRs #7870,
 #7868 and #7863 at frozen revisions with identical docs/code. Both reported zero
@@ -245,6 +246,27 @@ and one detail fetch returned 12,617 raw JSON bytes in 0.115 seconds; this is no
 billed tokens or total review time. The repeat changes both the library and the
 matcher relative to the earlier trial, so it cannot isolate either effect.
 Private collection and repeat-trial artifacts remain under ignored `data/`.
+
+Instrumented cost pilot on 5 November 2026: six fresh ephemeral same-model
+reviews of frozen PRs #7865, #7858 and #7839 used actual completed-turn token
+counters. Across the three pairs, agent review time including retrieval was
+316.55 seconds baseline versus 287.73 with Dreamer (-9.10%). Input plus output
+was 859,166 versus 794,871 tokens (-7.48%); uncached input fell only 2.59%, while
+output increased 3.39%. Both arms reported the same one CI defect, independently
+reproduced from pinned files; no incremental finding was established. All six
+migration previews were rejected as inapplicable, and the largest time reduction
+occurred with no applied lesson. One-off variation/cache effects and incidental
+access friction preclude attributing these reductions to memory. No monetary or
+net developer-workflow saving is claimed. A manual Mac measurement runner and
+synthetic schema/parser tests were added; all 18 Python project tests passed.
+Private frozen inputs, original reports, metrics and adjudication are in
+`data/review-cost-trial-2026-11-05/`; the shared report is `docs/evaluation.md`.
+Post-trial source handling, outside the timed runs, completed two justified skips
+and added one scoped appointment-identity uniqueness lesson from approved PR
+#7839. The frozen library had 58 lessons; the live library now has 59, so that PR
+is a learned source for future cohorts. No Pi/service deployment was performed.
+Next evidence-driven target: remove irrelevant migration-domain matches and
+measure ordinary task cost before making general efficiency claims.
 
 ## Milestone 5: learn from Codex conversations
 
@@ -364,7 +386,8 @@ paginated. The private rollout receipt is in ignored
 
 ## Conversation chronology safeguards
 
-Status: implemented and verified locally; schema-7 Pi rollout remains pending.
+Status: schema 7 deployed and first bounded conversation backfill verified on
+5 November 2026.
 Baseline `75cb901`, preserving the prior uncommitted rollout status. Full plan: persistence, MCP compatibility
 and destructive correction safety interact, so this is more than a UI change.
 
@@ -438,4 +461,93 @@ versions. Three repository scopes, conversation enablement and the private write
 file were preserved. Read-only live ranked recall still returned the original
 CM-1008 lesson. A read-only assessment attempt correctly refused the current
 schema-6 Pi with a schema-7 upgrade message; no production knowledge was modified.
-The schema-7 source changes remain uncommitted/unpushed and undeployed on the Pi.
+The initial local verification preceded Pi rollout; deployment is now confirmed
+by the runtime checks recorded below.
+
+First Gecko-API backfill verified on 5 November 2026: source commit `16ad694` is
+committed locally, both new Pi assessment capabilities respond, and a read-only
+correction probe rejects approximate temporal precedence. Ten conversations were
+selected; nine readable histories supplied 22 completed turns and 47 sanitized
+source items. Four provisional source-cited lessons were published and
+independently retrieved through get and normal ranked recall. Five pages completed
+with justified duplicate/scope/no-new-knowledge skips. One single oversized turn
+is unreadable through Codex's history API; it was not bypassed or marked learned.
+At that first checkpoint, two long chats still had older paginated turns
+unreviewed. Gecko-API then had 55
+lessons (previously 51), citing five chats (previously one). No existing lesson
+was overwritten, retired or superseded, and no stored-lesson conflict was
+established. The Pusher candidate retains a branch/publisher verification caveat.
+Private report and receipts: `data/conversation-backfills/2026-11-05-gecko-api-01/`.
+This is a bounded first backfill, not full conversation coverage or proof of
+improved code quality. No tenant/customer data was queried or published.
+
+
+Older-history continuation verified on 5 November 2026: supported cursor
+pagination reached the end of both long chats, adding 8 CM-1008 and 39 CM-1007
+completed turns across 24 pages without overlapping the first batch. Three
+additional source-cited hypotheses were published: exact external SSO identity
+binding, trustworthy recovery inputs before repair machinery, and verification
+of the specific WhatsApp fallback branch. Each was independently retrieved and
+ranked first for a targeted recall query. Twenty-one pages completed with
+specific duplicate, historical-context or no-new-knowledge skips; all 24 source
+retries returned `already_processed`. Gecko-API now has 58 lessons, still citing
+five chats and 45 PRs. Across both passes, nine readable chats supplied 69
+completed turns and seven new lessons. The original CM-1008 seed is unchanged;
+its complementary new lesson retains the Pi's approximate chronology / legacy
+keyless-peer warning despite a supplied consistent assessment. No terminal
+lesson changes or semantic conflicts were established. The export conversation
+still fails at one turn and 512 output characters with outputs disabled; no
+cursor or supported per-item pagination is returned, and it remains unprocessed.
+Private continuation report and receipts:
+`data/conversation-backfills/2026-11-05-gecko-api-02/`. These are provisional
+conversation lessons, not verified fixes or a measured code-quality improvement.
+
+### Selected-chat item reader and consolidation — 5 November 2026
+
+Implemented three Mac MCP tools: `prepare_codex_chat_learning`,
+`stage_chat_lessons` and `bundle_chat_evidence`, with matching CLI commands.
+The selected-thread reader uses supported Codex metadata/turn/item APIs over a
+temporary stdio connection. It never resumes tasks or opens raw session files.
+Only completed user/final messages are minimized and retained. UTF-8 fragments
+preserve original identity, full sanitized-view digests, source chronology and
+inspected byte ranges. Overlap cannot count as independent corroboration.
+
+Opaque turn/item cursors and fragment offsets checkpoint separately. Immutable
+local proposals advance reading without publication. Bounded windows require
+explicit dispositions for every proposal and consolidate through the existing
+assessment/publication path. Changed views invalidate stale citations; failed
+publication/corrections cannot silently complete a window. Legacy selected-page
+capture and schema-7 Pi citation shapes remain compatible. See
+[the conversation workflow](conversations.md#long-conversations-and-item-level-capture).
+
+Verification: 110 Rust tests with Mac features, 71 default/server tests and 19
+Python tests passed. Formatting, strict Clippy, skill validation, native Mac
+release and ARM64 server type-check passed. ARM verification remains a type-check,
+not a linked binary or physical Pi test. Fixtures cover long UTF-8 messages and
+ending corrections, source edits, unavailable sources, repository mismatch,
+filtered/empty pages, immutable staging, explicit consolidation, original-source
+citations, publication retries and duplicate prevention. The Mac installer also
+preserves a discoverable Codex CLI directory in the MCP process PATH.
+
+Live verification reached the previously unreadable export/collection chat:
+nine useful messages across five completed turns were inspected, staged and
+consumed by a justified no-new-knowledge bundle. They repeat existing PR-derived
+advice or historical collection requests/results; zero lessons were published.
+A later individual API response exceeds the 4 MB reader frame bound. Its type
+was not established; that item and subsequent history remain unprocessed at the
+saved checkpoint. This is partial progress, not full-chat completion. No raw-file
+fallback or fabricated cursor was used. Private receipts/report:
+`data/chunk-reader-live-2026-11-05/`.
+
+This addition needs an updated Mac client/guidance and a fresh Codex task to load
+the fifteen tools. An already deployed schema-7 Pi needs no new deployment or
+migration. No background collector/model or new credentials were added. Improved
+coverage and bounded context do not establish token/time savings; measure those
+separately using the existing review trial procedure.
+
+Mac installation verified for the item reader: a fresh MCP process exposes all
+fifteen tools and returns the saved incomplete source status with no pending
+stages. Installed release/skill match the tested versions; the three repository
+scopes, conversation enablement, writer credential file, unrelated Codex settings
+and personal guidance were preserved. Codex CLI discovery works from the managed
+MCP environment. Start a fresh task to load these definitions.

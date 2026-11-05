@@ -54,6 +54,12 @@ def install(home, binary, token_file, enable_conversations=False):
     gh = shutil.which("gh")
     if not gh:
         raise RuntimeError("GitHub CLI must be installed and available on this Mac.")
+    codex_cli = shutil.which("codex")
+    tool_paths = [str(Path(gh).parent)]
+    if codex_cli:
+        tool_paths.append(str(Path(codex_cli).parent))
+    tool_paths.extend(os.defpath.split(os.pathsep))
+    tool_path = os.pathsep.join(dict.fromkeys(tool_paths))
     subprocess.run([str(binary), 'mac', '--help'], check=True, capture_output=True)
     shared = home / '.local/share/dreamer'
     config_root = home / '.config/dreamer'
@@ -95,7 +101,7 @@ def install(home, binary, token_file, enable_conversations=False):
         'command = ' + json.dumps(str(installed)),
         'args = ' + json.dumps(['mac', '--settings', str(settings), 'mcp']),
         'startup_timeout_sec = 20', 'tool_timeout_sec = 180', '[mcp_servers.dreamer_mac.env]',
-        'PATH = ' + json.dumps(str(Path(gh).parent) + os.pathsep + os.defpath), CONFIG_END])
+        'PATH = ' + json.dumps(tool_path), CONFIG_END])
     updated = replace_section(existing, CONFIG_START, CONFIG_END, table)
     tomllib.loads(updated)
     guidance = ('\n'.join([START, '## Dreamer knowledge', '',

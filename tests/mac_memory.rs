@@ -439,7 +439,14 @@ async fn mac_stdio_exposes_workflow_tools_without_opening_github_or_pi() {
     command.arg("mac").arg("--settings").arg(path).arg("mcp");
     let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 12);
+    assert_eq!(tools.len(), 15);
+    for name in [
+        "prepare_codex_chat_learning",
+        "stage_chat_lessons",
+        "bundle_chat_evidence",
+    ] {
+        assert!(tools.iter().any(|tool| tool.name == name));
+    }
     let error = client
         .call_tool(
             CallToolRequestParams::new("recall_knowledge")
@@ -1311,6 +1318,7 @@ async fn older_pi_fallback_uses_the_same_exclusion_guard_and_rejects_scoped_writ
             ),
             observations: vec![],
             sensitive_terms: vec!["Customer Alpha".into()],
+            fragment_offset: None,
         },
     )
     .unwrap();

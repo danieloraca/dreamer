@@ -99,6 +99,39 @@ impl Settings {
 pub enum MacCommand {
     /// Run on-demand Mac MCP tools over stdio; no polling or model API calls.
     Mcp,
+    /// Read a bounded chunk from a selected Codex thread through the item API.
+    PrepareCodex {
+        #[arg(long)]
+        repository: String,
+        #[arg(long)]
+        thread_id: String,
+        #[arg(long)]
+        sensitive_term: Vec<String>,
+        #[arg(long)]
+        restart: bool,
+        #[arg(long)]
+        status_only: bool,
+    },
+    /// Stage inspected chat proposals privately without publishing them.
+    StageChat {
+        #[arg(long)]
+        repository: String,
+        #[arg(long)]
+        revision: String,
+        #[arg(
+            long,
+            conflicts_with = "skip_reason",
+            required_unless_present = "skip_reason"
+        )]
+        file: Option<PathBuf>,
+        #[arg(long, conflicts_with = "file")]
+        skip_reason: Option<String>,
+    },
+    /// Bundle selected staged source fragments for consolidated assessment/publication.
+    BundleChat {
+        #[arg(long)]
+        file: PathBuf,
+    },
     /// Capture one explicitly selected decoded Codex thread page (no crawling).
     PrepareChat {
         #[arg(long)]
@@ -227,6 +260,17 @@ pub async fn run(path: PathBuf, command: MacCommand) -> std::result::Result<(), 
             return server::serve(settings).await;
         }
         let value: Value = match command {
+            MacCommand::PrepareCodex { repository, thread_id, sensitive_term, restart, status_only } => {
+                let context=serde_json::json!({"repository":repository,"thread_id":thread_id});
+                activity::track(&settings,"prepare_codex_chat_learning",&context,async {
+                    conversations::prepare_codex(&settings,conversations::CodexChunkInput{repository,thread_id,sensitive_terms:sensitive_term,restart,status_only}).await
+                }).await?
+            }
+            MacCommand::StageChat {repository,revision,file,skip_reason} => {
+                let lessons=match file {Some(file)=>serde_json::from_slice(&fs::read(file)?)?,None=>Vec::new()};
+                conversations::stage(&settings,conversations::RememberChatInput{repository,revision,lessons,skip_reason})?
+            }
+            MacCommand::BundleChat {file} => conversations::bundle(&settings,serde_json::from_slice(&fs::read(file)?)?)?,
             MacCommand::PrepareChat {file} => {
                 let input: conversations::PrepareChatInput=serde_json::from_slice(&fs::read(file)?)?;
                 let context=serde_json::json!({"repository":input.repository,"thread_id":input.thread_id});

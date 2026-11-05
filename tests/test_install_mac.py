@@ -65,6 +65,15 @@ class MacInstallerTests(unittest.TestCase):
         self.assertEqual(result['endpoint'], 'http://127.0.0.1:9988/mcp')
         self.assertEqual(result['writer_token_file'], 'private.env')
 
+    def test_item_reader_can_find_codex_outside_the_github_cli_directory(self):
+        with patch.object(installer.shutil, 'which', side_effect=lambda name: {
+            'gh': '/fixture/github/bin/gh', 'codex': '/fixture/codex/bin/codex'
+        }.get(name)), patch.object(installer.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)):
+            installer.install(self.home, self.binary, self.writer)
+        configured = tomllib.loads(self.codex.read_text())['mcp_servers']['dreamer_mac']['env']['PATH']
+        self.assertEqual(configured.split(installer.os.pathsep)[:2], ['/fixture/github/bin', '/fixture/codex/bin'])
+        self.assertNotIn('DREAMER_MCP_WRITE_TOKEN', configured)
+
     def test_selected_chat_enablement_preserves_scope_and_stays_enabled(self):
         with patch.object(installer.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)):
             _, settings = installer.install(self.home, self.binary, self.writer)

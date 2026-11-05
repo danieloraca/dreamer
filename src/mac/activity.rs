@@ -31,7 +31,7 @@ type RunContext = (
 );
 fn context(settings: &Settings, name: &str, input: &Value) -> Result<RunContext> {
     match name {
-        "prepare_chat_learning" => {
+        "prepare_chat_learning" | "prepare_codex_chat_learning" => {
             let repo = settings.select_repository(input["repository"].as_str())?;
             let thread = input["thread_id"]
                 .as_str()
@@ -262,6 +262,7 @@ where
             | "remember_pr_lessons"
             | "reconcile_pr_lessons"
             | "prepare_chat_learning"
+            | "prepare_codex_chat_learning"
             | "remember_chat_lessons"
             | "reconcile_chat_lessons"
     ) {
@@ -278,7 +279,10 @@ where
             Err(_) => RunState::Failed,
         };
         if let Ok(value) = &result {
-            if let Some(revision) = value["revision"].as_str() {
+            if let Some(revision) = value["revision"]
+                .as_str()
+                .or_else(|| value["chunk"]["revision"].as_str())
+            {
                 local.run.revision = Some(revision.into());
             }
             if local.run.phase != RunPhase::Capture {

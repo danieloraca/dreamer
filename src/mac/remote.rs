@@ -214,10 +214,20 @@ fn compact_recall(
         let b_score = b["relevance"]["score"]
             .as_u64()
             .unwrap_or(*b_matches as u64);
-        b_score.cmp(&a_score).then_with(|| a_id.cmp(b_id))
+        b_score
+            .cmp(&a_score)
+            .then_with(|| {
+                fn source_time(v: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
+                    chrono::DateTime::parse_from_rfc3339(v["chronology"]["source_to"].as_str()?)
+                        .ok()
+                        .map(|t| t.with_timezone(&chrono::Utc))
+                }
+                source_time(b).cmp(&source_time(a))
+            })
+            .then_with(|| a_id.cmp(b_id))
     });
     let mut reply = json!({"repository":repository,"queries":queries,"matched_count":total,"search_limited":search_limited,"truncated":total>limit || search_limited,"lessons":[],
-        "guidance":"Task-word/context matches, not confidence scores. matching_queries counts word groups, not exact phrases; zero means context only. Fetch get_knowledge for selected IDs before applying; inspect conflict history, full applicability and evidence. Shortened text can omit exclusions. Zero results does not establish absence of knowledge."});
+        "guidance":"Task-word/context matches, not confidence scores. matching_queries counts word groups, not exact phrases; zero means context only. Fetch get_knowledge for selected IDs before applying; inspect conflict history, full applicability and evidence. Shortened text can omit exclusions. Source chronology is separate from storage time; inspect related advice and current docs/code before choosing between competing lessons. Zero results does not establish absence of knowledge."});
     for (id, (stored, matches)) in ranked.into_iter().take(limit) {
         let lesson = &stored["lesson"];
         let (summary, summary_shortened) = shortened(
@@ -255,7 +265,12 @@ fn compact_recall(
         });
         let scope=lesson.get("scope").map(|scope|json!({"components":scope["components"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>()),"paths":scope["paths"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>()),"has_exclusions":scope["excluded_terms"].as_array().is_some_and(|v|!v.is_empty()),"preview_only":true}));
         let context=stored.get("relevance").map(|r|json!({"score":r["score"],"matched_tokens":r["matched_tokens"].as_array().map(|v|v.iter().take(6).collect::<Vec<_>>()),"matched_components":r["matched_components"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>()),"matched_paths":r["matched_paths"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>())}));
-        let preview = json!({"lesson":{"id":id,"summary":summary,"applies_when":applies_when,"status":lesson["status"]},"lifecycle":lifecycle,"scope":scope,"relevance":context,"matching_queries":matches,"evidence_count":evidence.len()+chats.map_or(0,Vec::len),"source_prs":prs.into_iter().take(4).collect::<Vec<_>>(),"source_chats":chat_threads.into_iter().take(3).collect::<Vec<_>>(),"conversation_claims":chat_claims.into_iter().take(3).collect::<Vec<_>>(),"shortened":{"summary":summary_shortened,"applies_when":applicability_shortened},"needs_details":true});
+        let chronology=stored.get("chronology").map(|v| {
+            let ids=v["related_lesson_ids"].as_array();
+            let kept=ids.map(|ids|ids.iter().filter(|id|id.as_str().is_some_and(|s|s.len()<=120)).take(3).collect::<Vec<_>>()).unwrap_or_default();
+            json!({"knowledge_key":v["knowledge_key"],"source_from":v["source_from"],"source_to":v["source_to"],"source_time_precision":v["source_time_precision"],"relation":v["relation"],"needs_reconciliation":v["needs_reconciliation"],"related_truncated":v["related_truncated"]==true||ids.is_some_and(|ids|ids.len()>kept.len()),"related_lesson_ids":kept})
+        });
+        let preview = json!({"lesson":{"id":id,"summary":summary,"applies_when":applies_when,"status":lesson["status"]},"lifecycle":lifecycle,"chronology":chronology,"scope":scope,"relevance":context,"matching_queries":matches,"evidence_count":evidence.len()+chats.map_or(0,Vec::len),"source_prs":prs.into_iter().take(4).collect::<Vec<_>>(),"source_chats":chat_threads.into_iter().take(3).collect::<Vec<_>>(),"conversation_claims":chat_claims.into_iter().take(3).collect::<Vec<_>>(),"shortened":{"summary":summary_shortened,"applies_when":applicability_shortened},"needs_details":true});
         reply["lessons"].as_array_mut().unwrap().push(preview);
         if serde_json::to_vec(&reply)?.len() > 11_700 {
             reply["lessons"].as_array_mut().unwrap().pop();
@@ -306,5 +321,18 @@ mod tests {
             reply["lessons"][0]["lesson"]["applies_when"],
             "For account lists; exclude public endpoints."
         );
+    }
+    #[test]
+    fn chronology_previews_preserve_warnings_without_expanding_source_lists() {
+        let records=(0..8).map(|n|(format!("chat-{n}"),(json!({"lesson":{"summary":"Keep staged account access checks separate.","applies_when":"For external identity migrations with pending acceptance.","status":"candidate","evidence":[]},"chronology":{"knowledge_key":"auth.account-access","source_from":"2026-01-01T00:00:00Z","source_to":"2026-01-01T00:00:00Z","source_time_precision":"message","relation":"older_context","needs_reconciliation":true,"related_lesson_ids":vec!["x".repeat(1000);12],"related_truncated":false,"guidance":"verbose guidance".repeat(500)}}),1))).collect();
+        let reply =
+            compact_recall("example/project", &["account".into()], 10, records, false).unwrap();
+        assert!(serde_json::to_vec(&reply).unwrap().len() <= 12_000);
+        for preview in reply["lessons"].as_array().unwrap() {
+            assert_eq!(preview["chronology"]["needs_reconciliation"], true);
+            assert_eq!(preview["chronology"]["relation"], "older_context");
+            assert_eq!(preview["chronology"]["related_truncated"], true);
+            assert!(preview["chronology"].get("guidance").is_none());
+        }
     }
 }

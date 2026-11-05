@@ -49,6 +49,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "conversation_evidence",
         sql: include_str!("../../migrations/0006_conversation_evidence.sql"),
     },
+    Migration {
+        version: 7,
+        name: "knowledge_keys",
+        sql: include_str!("../../migrations/0007_knowledge_keys.sql"),
+    },
 ];
 
 #[derive(Debug)]
@@ -222,7 +227,7 @@ fn migrate(connection: &mut Connection, migrations: &[Migration]) -> Result<(), 
     Ok(())
 }
 
-fn read_lesson(
+fn read_lesson_base(
     connection: &Connection,
     repository: &str,
     id: &str,
@@ -295,11 +300,13 @@ fn read_lesson(
             applies_when,
             status,
             scope: read_scope(connection, repository, id)?,
+            knowledge_key: connection.query_row("SELECT knowledge_key FROM lesson_knowledge_keys WHERE repository=?1 AND lesson_id=?2",params![repository,id],|r|r.get(0)).optional()?,
             provenance: Provenance { producer, method },
             evidence,
             conversation_evidence,
         },
         stored_at,
+        chronology: None,
         lifecycle: read_lifecycle(connection, repository, id)?,
     }))
 }
@@ -458,7 +465,7 @@ impl SqliteStore {
             return retrieval::rank(query, Vec::new(), false).map_err(StoreError::Invalid);
         }
         let tx = self.connection.unchecked_transaction()?;
-        let mut statement=tx.prepare(&format!("SELECT l.id FROM lessons l WHERE l.repository=?1 AND l.status!='deprecated' AND ({}) ORDER BY l.stored_at DESC,l.id ASC LIMIT 1001",predicates.join(" OR ")))?;
+        let mut statement=tx.prepare(&format!("SELECT l.id FROM lessons l WHERE l.repository=?1 AND l.status!='deprecated' AND ({}) ORDER BY l.id ASC LIMIT 1001",predicates.join(" OR ")))?;
         let ids = statement
             .query_map(rusqlite::params_from_iter(values), |row| {
                 row.get::<_, String>(0)
@@ -569,6 +576,7 @@ impl SqliteStore {
                 ));
             }
         }
+        guard_chat_change(&tx, &source, &change)?;
         tx.execute("INSERT INTO lesson_changes (repository,id,source_id,action,target_id,reason,payload) VALUES (?1,?2,?3,?4,?5,?6,?7)",
             params![change.repository,id,change.source_id,change.action.as_str(),change.target_id,change.reason,payload])?;
         if change.action != ChangeAction::Conflict {
@@ -730,72 +738,7 @@ impl LessonStore for SqliteStore {
 
     /// Atomic, insert-only import. Exact retries are no-ops; conflicting IDs fail.
     fn put_candidate(&mut self, lesson: &Lesson) -> Result<WriteOutcome, Self::Error> {
-        lesson.validate_candidate().map_err(StoreError::Invalid)?;
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(existing) = read_lesson(&transaction, &lesson.repository, &lesson.id)? {
-            if existing.lesson == *lesson {
-                return Ok(WriteOutcome::Unchanged);
-            }
-            return Err(StoreError::Conflict(format!(
-                "lesson {}/{} already exists with different content",
-                lesson.repository, lesson.id
-            )));
-        }
-        let method = match lesson.provenance.method {
-            ExtractionMethod::Manual => "manual",
-            ExtractionMethod::Fixture => "fixture",
-        };
-        transaction.execute(
-            "INSERT INTO lessons (repository, id, summary, applies_when, status, producer, method)
-             VALUES (?1, ?2, ?3, ?4, 'candidate', ?5, ?6)",
-            params![
-                lesson.repository,
-                lesson.id,
-                lesson.summary,
-                lesson.applies_when,
-                lesson.provenance.producer,
-                method
-            ],
-        )?;
-        for (ordinal, evidence) in lesson.evidence.iter().enumerate() {
-            let pr = &evidence.pull_request;
-            transaction.execute(
-                "INSERT INTO pull_requests (repository, number, head_sha, url, title) VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT (repository, number, head_sha) DO NOTHING",
-                params![lesson.repository, pr.number, pr.head_sha, pr.url, pr.title],
-            )?;
-            let (url, title): (String, String) = transaction.query_row(
-                "SELECT url, title FROM pull_requests WHERE repository = ?1 AND number = ?2 AND head_sha = ?3",
-                params![lesson.repository, pr.number, pr.head_sha], |row| Ok((row.get(0)?, row.get(1)?)),
-            )?;
-            if url != pr.url || title != pr.title {
-                return Err(StoreError::Conflict(format!(
-                    "PR #{} revision {} has different source metadata",
-                    pr.number, pr.head_sha
-                )));
-            }
-            transaction.execute(
-                "INSERT INTO lesson_evidence (repository, lesson_id, ordinal, pr_number, pr_head_sha, source_url, commit_sha, description)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![lesson.repository, lesson.id, ordinal as i64, pr.number, pr.head_sha, evidence.source_url, evidence.commit_sha, evidence.description],
-            )?;
-        }
-        for (ordinal, proof) in lesson.conversation_evidence.iter().enumerate() {
-            transaction.execute("INSERT INTO conversation_evidence(repository,lesson_id,ordinal,thread_id,payload) VALUES (?1,?2,?3,?4,?5)", params![lesson.repository,lesson.id,ordinal as i64,proof.thread_id,serde_json::to_string(proof).expect("chat evidence serialization")])?;
-        }
-        for (kind, values) in [
-            ("component", &lesson.scope.components),
-            ("path", &lesson.scope.paths),
-            ("exclude", &lesson.scope.excluded_terms),
-        ] {
-            for (ordinal, value) in values.iter().enumerate() {
-                transaction.execute("INSERT INTO lesson_scope(repository,lesson_id,kind,ordinal,value) VALUES (?1,?2,?3,?4,?5)",params![lesson.repository,lesson.id,kind,ordinal as i64,value])?;
-            }
-        }
-        transaction.commit()?;
-        Ok(WriteOutcome::Inserted)
+        self.put_assessed_candidate(lesson, None)
     }
 
     fn get(&self, repository: &str, id: &str) -> Result<Option<StoredLesson>, Self::Error> {
@@ -865,5 +808,283 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0);
+    }
+}
+
+impl SqliteStore {
+    pub fn put_assessed_candidate(
+        &mut self,
+        lesson: &Lesson,
+        assessment_token: Option<&str>,
+    ) -> Result<WriteOutcome, StoreError> {
+        lesson.validate_candidate().map_err(StoreError::Invalid)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(existing) = read_lesson(&transaction, &lesson.repository, &lesson.id)? {
+            if existing.lesson == *lesson {
+                return Ok(WriteOutcome::Unchanged);
+            }
+            return Err(StoreError::Conflict(format!(
+                "lesson {}/{} already exists with different content",
+                lesson.repository, lesson.id
+            )));
+        }
+        let method = match lesson.provenance.method {
+            ExtractionMethod::Manual => "manual",
+            ExtractionMethod::Fixture => "fixture",
+        };
+        if !lesson.conversation_evidence.is_empty() && lesson.knowledge_key.is_none() {
+            return Err(StoreError::Invalid(
+                "new chat lessons require a narrow knowledge_key; preserve legacy exact retries",
+            ));
+        }
+        let assessment = assess(&transaction, lesson)?;
+        if (assessment_token.is_some() || !assessment.related_lessons.is_empty())
+            && assessment_token != Some(assessment.assessment_token.as_str())
+        {
+            return Err(StoreError::Conflict("knowledge changed or related lessons were not assessed; run assess_conversation_candidate before publication".into()));
+        }
+        transaction.execute(
+            "INSERT INTO lessons (repository, id, summary, applies_when, status, producer, method)
+             VALUES (?1, ?2, ?3, ?4, 'candidate', ?5, ?6)",
+            params![
+                lesson.repository,
+                lesson.id,
+                lesson.summary,
+                lesson.applies_when,
+                lesson.provenance.producer,
+                method
+            ],
+        )?;
+        for (ordinal, evidence) in lesson.evidence.iter().enumerate() {
+            let pr = &evidence.pull_request;
+            transaction.execute(
+                "INSERT INTO pull_requests (repository, number, head_sha, url, title) VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT (repository, number, head_sha) DO NOTHING",
+                params![lesson.repository, pr.number, pr.head_sha, pr.url, pr.title],
+            )?;
+            let (url, title): (String, String) = transaction.query_row(
+                "SELECT url, title FROM pull_requests WHERE repository = ?1 AND number = ?2 AND head_sha = ?3",
+                params![lesson.repository, pr.number, pr.head_sha], |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            if url != pr.url || title != pr.title {
+                return Err(StoreError::Conflict(format!(
+                    "PR #{} revision {} has different source metadata",
+                    pr.number, pr.head_sha
+                )));
+            }
+            transaction.execute(
+                "INSERT INTO lesson_evidence (repository, lesson_id, ordinal, pr_number, pr_head_sha, source_url, commit_sha, description)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![lesson.repository, lesson.id, ordinal as i64, pr.number, pr.head_sha, evidence.source_url, evidence.commit_sha, evidence.description],
+            )?;
+        }
+        for (ordinal, proof) in lesson.conversation_evidence.iter().enumerate() {
+            transaction.execute("INSERT INTO conversation_evidence(repository,lesson_id,ordinal,thread_id,payload) VALUES (?1,?2,?3,?4,?5)", params![lesson.repository,lesson.id,ordinal as i64,proof.thread_id,serde_json::to_string(proof).expect("chat evidence serialization")])?;
+        }
+        for (kind, values) in [
+            ("component", &lesson.scope.components),
+            ("path", &lesson.scope.paths),
+            ("exclude", &lesson.scope.excluded_terms),
+        ] {
+            for (ordinal, value) in values.iter().enumerate() {
+                transaction.execute("INSERT INTO lesson_scope(repository,lesson_id,kind,ordinal,value) VALUES (?1,?2,?3,?4,?5)",params![lesson.repository,lesson.id,kind,ordinal as i64,value])?;
+            }
+        }
+        if let Some(key) = &lesson.knowledge_key {
+            transaction.execute("INSERT INTO lesson_knowledge_keys(repository,lesson_id,knowledge_key) VALUES (?1,?2,?3)",params![lesson.repository,lesson.id,key])?;
+        }
+        transaction.commit()?;
+        Ok(WriteOutcome::Inserted)
+    }
+}
+
+fn active_peers(connection: &Connection, lesson: &Lesson) -> Result<Vec<StoredLesson>, StoreError> {
+    if lesson.knowledge_key.is_none() && lesson.conversation_evidence.is_empty() {
+        return Ok(vec![]);
+    }
+    let key = lesson.knowledge_key.as_deref();
+    let mut q=connection.prepare("SELECT l.id FROM lessons l LEFT JOIN lesson_knowledge_keys k ON k.repository=l.repository AND k.lesson_id=l.id WHERE l.repository=?1 AND l.id!=?2 AND l.status!='deprecated' AND (k.knowledge_key=?3 OR ((k.knowledge_key IS NULL OR ?3 IS NULL) AND EXISTS(SELECT 1 FROM conversation_evidence e WHERE e.repository=l.repository AND e.lesson_id=l.id AND e.thread_id IN (SELECT value FROM json_each(?4))))) ORDER BY l.id LIMIT 13")?;
+    let ids = q
+        .query_map(
+            params![
+                lesson.repository,
+                lesson.id,
+                key,
+                serde_json::to_string(
+                    &lesson
+                        .conversation_evidence
+                        .iter()
+                        .map(|e| &e.thread_id)
+                        .collect::<Vec<_>>()
+                )
+                .expect("thread identity serialization")
+            ],
+            |r| r.get::<_, String>(0),
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.iter()
+        .map(|id| {
+            read_lesson_base(connection, &lesson.repository, id)?
+                .ok_or_else(|| StoreError::Schema("peer disappeared".into()))
+        })
+        .collect()
+}
+fn read_lesson(
+    connection: &Connection,
+    repository: &str,
+    id: &str,
+) -> Result<Option<StoredLesson>, StoreError> {
+    let Some(mut stored) = read_lesson_base(connection, repository, id)? else {
+        return Ok(None);
+    };
+    let peers = active_peers(connection, &stored.lesson)?;
+    stored.chronology = crate::chronology::summary(
+        &stored.lesson,
+        &peers.iter().map(|p| p.lesson.clone()).collect::<Vec<_>>(),
+        peers.len() > 12,
+    );
+    Ok(Some(stored))
+}
+#[derive(serde::Serialize)]
+pub struct ConversationAssessment {
+    pub repository: String,
+    pub knowledge_key: Option<String>,
+    pub assessment_token: String,
+    pub chronology: Option<crate::chronology::ChronologySummary>,
+    pub related_lessons: Vec<StoredLesson>,
+}
+fn assess(connection: &Connection, lesson: &Lesson) -> Result<ConversationAssessment, StoreError> {
+    let mut peers = active_peers(connection, lesson)?;
+    if peers.len() > 12 {
+        return Err(StoreError::Invalid(
+            "too many active same-key lessons; reconcile before adding more",
+        ));
+    }
+    let token = crate::collector::digest(
+        &serde_json::to_vec(&serde_json::json!([
+            lesson.repository,
+            lesson.knowledge_key,
+            peers
+        ]))
+        .expect("assessment serialization"),
+    );
+    for peer in &mut peers {
+        peer.chronology = crate::chronology::summary(&peer.lesson, &[], false);
+    }
+    let assessment = ConversationAssessment {
+        repository: lesson.repository.clone(),
+        knowledge_key: lesson.knowledge_key.clone(),
+        assessment_token: token,
+        chronology: crate::chronology::summary(
+            lesson,
+            &peers.iter().map(|p| p.lesson.clone()).collect::<Vec<_>>(),
+            false,
+        ),
+        related_lessons: peers,
+    };
+    if serde_json::to_vec(&assessment)
+        .expect("assessment serialization")
+        .len()
+        > 100_000
+    {
+        return Err(StoreError::Invalid(
+            "assessment exceeds 100 KB; inspect and consolidate related knowledge before adding more",
+        ));
+    }
+    Ok(assessment)
+}
+impl SqliteStore {
+    pub fn assess_conversation(
+        &self,
+        lesson: &Lesson,
+    ) -> Result<ConversationAssessment, StoreError> {
+        lesson.validate_candidate().map_err(StoreError::Invalid)?;
+        if lesson.knowledge_key.is_none() || lesson.conversation_evidence.is_empty() {
+            return Err(StoreError::Invalid(
+                "assessment requires a chat lesson with a narrow knowledge_key",
+            ));
+        }
+        let tx = self.connection.unchecked_transaction()?;
+        let result = assess(&tx, lesson)?;
+        tx.commit()?;
+        Ok(result)
+    }
+}
+
+fn guard_chat_change(
+    connection: &Connection,
+    source: &StoredLesson,
+    change: &LessonChange,
+) -> Result<(), StoreError> {
+    if change.action != ChangeAction::Conflict && !change.conversation_evidence.is_empty() {
+        let mut affected = vec![source.lesson.clone()];
+        let peers = active_peers(connection, &source.lesson)?;
+        if peers.len() > 12 {
+            return Err(StoreError::Invalid(
+                "too many related lessons; reconcile their contexts before terminal changes",
+            ));
+        }
+        // The replacement is not being displaced. Its own correcting source may
+        // be the very evidence supporting this supersession. Guard other peers.
+        affected.extend(
+            peers
+                .into_iter()
+                .filter(|p| change.target_id.as_deref() != Some(p.lesson.id.as_str()))
+                .map(|p| p.lesson),
+        );
+        // Previously recorded conflicts are also relevant; ingestion time is never precedence.
+        let mut q=connection.prepare("SELECT payload FROM lesson_changes WHERE repository=?1 AND (source_id=?2 OR target_id=?2)")?;
+        for payload in q.query_map(params![change.repository, change.source_id], |r| {
+            r.get::<_, String>(0)
+        })? {
+            let old: LessonChange = serde_json::from_str(&payload?)
+                .map_err(|_| StoreError::Schema("invalid prior correction".into()))?;
+            let mut context = source.lesson.clone();
+            context.evidence = old.evidence;
+            context.conversation_evidence = old.conversation_evidence;
+            affected.push(context);
+        }
+        crate::chronology::guard_terminal(&change.conversation_evidence, &affected)
+            .map_err(StoreError::Invalid)?;
+    }
+    Ok(())
+}
+impl SqliteStore {
+    pub fn assess_change(&self, proposed: &LessonChange) -> Result<serde_json::Value, StoreError> {
+        proposed.validate().map_err(StoreError::Invalid)?;
+        let change = proposed.canonical();
+        let tx = self.connection.unchecked_transaction()?;
+        let prior: Option<String> = tx
+            .query_row(
+                "SELECT payload FROM lesson_changes WHERE repository=?1 AND id=?2",
+                params![change.repository, change.id()],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(prior) = prior {
+            if prior != serde_json::to_string(&change).expect("change serialization") {
+                return Err(StoreError::Conflict("change identity conflict".into()));
+            }
+            return Ok(serde_json::json!({"allowed":true,"already_applied":true}));
+        }
+        let source = read_lesson(&tx, &change.repository, &change.source_id)?
+            .ok_or(StoreError::Invalid("source lesson not found"))?;
+        if source.lesson.status == LessonStatus::Deprecated {
+            return Err(StoreError::Invalid("source lesson is deprecated"));
+        }
+        if let Some(id) = &change.target_id {
+            let target = read_lesson(&tx, &change.repository, id)?
+                .ok_or(StoreError::Invalid("target lesson not found"))?;
+            if target.lesson.status == LessonStatus::Deprecated {
+                return Err(StoreError::Invalid("target lesson is deprecated"));
+            }
+        }
+        guard_chat_change(&tx, &source, &change)?;
+        tx.commit()?;
+        Ok(
+            serde_json::json!({"allowed":true,"already_applied":false,"guidance":"Read-only preflight; mutation rechecks chronology inside its transaction."}),
+        )
     }
 }

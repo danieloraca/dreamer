@@ -93,3 +93,10 @@ and incremental receipts stay on the Mac; only lessons and typed citations reach
 the Pi. See [selected-chat learning](conversations.md).
 
 Only synthetic PR/chat evidence and lessons are included in this repository.
+
+Schema 7 adds indexed repository-scoped knowledge keys. Source times and their
+basis are optional conversation metadata, distinct from observation/storage time.
+Related context is computed at read time without rewriting original lessons.
+Assessment tokens prevent publishing against stale related knowledge; terminal
+chat corrections recheck source chronology inside the existing transaction.
+Semantic contradictions still need agent judgment/current docs and code.

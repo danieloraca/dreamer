@@ -412,6 +412,11 @@ pub fn rank(
         b.relevance
             .score
             .cmp(&a.relevance.score)
+            .then_with(|| {
+                crate::chronology::lesson_range(&b.stored.lesson)
+                    .map(|(_, t)| t)
+                    .cmp(&crate::chronology::lesson_range(&a.stored.lesson).map(|(_, t)| t))
+            })
             .then_with(|| a.stored.lesson.id.cmp(&b.stored.lesson.id))
     });
     let matched_count = hits.len();

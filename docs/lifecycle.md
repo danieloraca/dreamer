@@ -113,3 +113,8 @@ Older binaries reject database versions newer than their supported schema. Rollb
 consistent database backup; keep the newer DB separately and stop writers before
 any restore. Do not restore over an active WAL database. Scheduled backup/restore
 automation and richer dashboard history navigation remain later master-plan work.
+
+Chat-backed changes now require the [schema-7 chronology guard](conversations.md#chronology-and-backfilling-schema-7).
+Older, equal, unknown or approximate dates cannot justify retire/supersede; an
+unresolved conflict preserves both active lessons. Current PR-only workflows
+continue to use their existing inspected-evidence checks.

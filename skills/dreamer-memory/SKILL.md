@@ -128,7 +128,10 @@ Use Codex `read_thread` for a small page of the selected thread. Before passing
 its decoded JSON to `prepare_chat_learning`, discard reasoning, commentary,
 raw tool arguments and command text; minimize user/final-answer text and redact
 names, emails, account/resource values and local paths. Preserve thread/turn/item
-identity, completed-turn status and page cursors. Automatic redaction is only a
+identity, completed-turn status, original item `createdAt` / turn `startedAt`
+when genuinely supplied as RFC3339, and page cursors. Never substitute capture
+time or a thread’s last-updated time. Missing dates stay unknown; UUIDv7 turn-start
+estimates are labelled and cannot establish exact message precedence. Automatic redaction is only a
 heuristic; use `sensitive_terms` for remaining identifiers and inspect the result.
 Do not write an unfiltered thread response to disk. Read more pages only when
 needed for this task. Omitting `page` returns a saved cursor hint, not completion
@@ -144,7 +147,7 @@ field in the in-memory input solely for hashing/validation. A tool status or
 truncated output is insufficient. Do not cite raw arguments as evidence.
 
 Call `remember_chat_lessons` with inspected IDs, summary, clear applicability,
-optional scope, and one claim class:
+optional scope, a narrow stable `knowledge_key`, and one claim class:
 
 - `decision` or `correction` needs a user statement that actually supports it.
 - `observed_outcome` needs an inspected result plus another supporting source;
@@ -152,9 +155,40 @@ optional scope, and one claim class:
 - `hypothesis` needs the summary prefix `Hypothesis (unverified): `; an assistant
   proposal remains provisional even when useful.
 
+Use the same `knowledge_key` for the same claim and applicability context across
+conversations (for example `auth.external-idp.account-matching`), never a broad
+component or date. Recall existing advice first, including legacy keyless lessons.
+`assess_chat_lessons` compares inspected drafts with active same-key records and
+unclassified records from the same chat. Read the related lessons and their full
+applicability/history. Supply its `assessment_token` and a `related_assessments`
+entry (`id`, `relation`, specific sanitized `reason`) for every returned peer:
+`consistent`, `historical`, `conflict` or `correction`. These are agent assessments,
+not individual user approvals. Different keys can still describe contradictory
+advice; semantic matching remains your responsibility. If no peers exist, ordinary
+publication can obtain the empty assessment automatically.
+
+Treat `older_context` as historical advice; it cannot become a new correction
+because it was captured later. Approximate or undated context does not establish
+precedence. A later timestamp alone does not prove correctness.
+Check project docs/current code and explicit corrections; inspect competing advice
+and use conflict handling when uncertain. Chronology warnings appear in recall,
+full details and the dashboard. Rank scores and recent storage timestamps do not
+establish authority. Reuse a known key rather than inventing a new one to bypass
+an assessment. Truncated peer lists must not be treated as complete.
+
+Terminal chat changes need explicit correction/inspected-outcome evidence with
+known message times strictly later than the affected lesson, related advice and
+its conflict history. Unknown, equal, older or turn-start-only dates cannot retire
+or supersede knowledge. Keep historical context or record an unresolved conflict;
+use inspected current PR evidence when that independently establishes a correction.
+Never invent timestamps to pass the guard. The Pi rechecks inside its transaction.
+
 No per-lesson approval is required. Use an empty batch with a specific
 `skip_reason` after inspection yields no supported new lesson. Reuse identical
-drafts after an interrupted write; receipts and exact Pi readback govern success.
+draft content after an interrupted write; receipts and exact Pi readback govern
+success. You may refresh only assessment tokens/reasons while a publication is
+pending; re-assess when knowledge changes. Already applied changes remain no-ops;
+a previously pending unsafe correction may now fail and must not be marked done.
 Known revised source items invalidate their old cached revision. Reassess existing
 advice explicitly: `reconcile_chat_lessons` can supersede, retire or flag conflicts
 with inspected chat evidence, preserving original content and history. Publish an

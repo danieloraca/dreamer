@@ -124,3 +124,12 @@ validation and role/scope boundary. Lessons and lifecycle changes may carry
 required. Read tools return typed citations, and the dashboard displays chat links
 and claim classes. Excerpts remain on the Mac. Mac selected-chat tools and the
 update order are documented in [conversation learning](conversations.md).
+
+## Source chronology (schema 7)
+
+Read-only `assess_conversation_candidate` accepts `lesson` and returns bounded
+related knowledge and `assessment_token`. Candidate submission accepts that token
+and rechecks it atomically when related advice exists. Read-only
+`assess_lesson_change` accepts `change`; terminal chat corrections are subject to
+the same date guard in `change_lesson`. New chat lessons need a narrow
+`knowledge_key`. See [backfill rules](conversations.md#chronology-and-backfilling-schema-7).

@@ -54,6 +54,28 @@ pub struct ChatDraft {
     #[serde(default)]
     pub scope: LessonScope,
     pub evidence_ids: Vec<String>,
+    /// Required for a new lesson: a narrow stable claim/context key, never a broad component or date. Omit only for an exact legacy retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knowledge_key: Option<String>,
+    #[serde(default)]
+    pub assessment_token: Option<String>,
+    #[serde(default)]
+    pub related_assessments: Vec<RelatedAssessment>,
+}
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RelatedAssessment {
+    pub id: String,
+    pub relation: RelatedRelation,
+    pub reason: String,
+}
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RelatedRelation {
+    Consistent,
+    Historical,
+    Conflict,
+    Correction,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -72,6 +94,8 @@ struct Item {
     kind: ConversationKind,
     text: String,
     content_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_time: Option<crate::chronology::SourceTime>,
 }
 #[derive(Serialize, Deserialize)]
 struct Snapshot {
@@ -344,7 +368,9 @@ fn page_items(input: &PrepareChatInput) -> Result<Snapshot> {
                 None => collector::digest(sanitized.as_bytes()),
             };
             let text = short(&sanitized, 1600);
+            let source_time = capture_time(i, t, turn)?;
             items.push(Item {
+                source_time,
                 id: id.into(),
                 turn_id: turn.into(),
                 kind,
@@ -571,7 +597,7 @@ pub fn build(
                 .iter()
                 .find(|i| &i.id == id)
                 .ok_or("missing chat source")?;
-            proof.push(ConversationEvidence{provider:"codex".into(),thread_id:s.thread_id.clone(),turn_id:i.turn_id.clone(),item_id:i.id.clone(),source_url:format!("codex://threads/{}",s.thread_id),observed_at:s.observed_at.clone(),content_sha256:i.content_sha256.clone(),kind:i.kind,claim:d.claim,description:"Agent-inspected sanitized conversation excerpt. Source assertions are not independently verified; recorded permissions do not authorize new operations.".into()});
+            proof.push(ConversationEvidence{source_time:i.source_time.clone(),provider:"codex".into(),thread_id:s.thread_id.clone(),turn_id:i.turn_id.clone(),item_id:i.id.clone(),source_url:format!("codex://threads/{}",s.thread_id),observed_at:s.observed_at.clone(),content_sha256:i.content_sha256.clone(),kind:i.kind,claim:d.claim,description:"Agent-inspected sanitized conversation excerpt. Source assertions are not independently verified; recorded permissions do not authorize new operations.".into()});
         }
         proof.sort_by(|a, b| a.item_id.cmp(&b.item_id));
         let mut identity = serde_json::to_value(&proof)?;
@@ -579,18 +605,22 @@ pub fn build(
             item.as_object_mut().unwrap().remove("observed_at");
         }
         let scope = d.scope.canonical();
+        let mut identity_data = json!([
+            repo,
+            d.summary.split_whitespace().collect::<Vec<_>>().join(" "),
+            d.applies_when
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" "),
+            scope,
+            identity
+        ]);
+        if let Some(key) = &d.knowledge_key {
+            identity_data.as_array_mut().unwrap().push(json!(key));
+        }
         let id = format!(
             "chat-{}",
-            &collector::digest(&serde_json::to_vec(&json!([
-                repo,
-                d.summary.split_whitespace().collect::<Vec<_>>().join(" "),
-                d.applies_when
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                scope,
-                identity
-            ]))?)[..24]
+            &collector::digest(&serde_json::to_vec(&identity_data)?)[..24]
         );
         let l = Lesson {
             id,
@@ -599,6 +629,7 @@ pub fn build(
             applies_when: d.applies_when.trim().into(),
             status: LessonStatus::Candidate,
             scope,
+            knowledge_key: d.knowledge_key.clone(),
             provenance: Provenance {
                 producer:
                     "Codex agent via Dreamer Mac; conversation-derived, not independently verified"
@@ -636,10 +667,9 @@ pub async fn remember(settings: &Settings, input: RememberChatInput) -> Result<V
     let drafts = serde_json::to_value(&input.lessons)?;
     let journal = dir.join("publication.json");
     let prior = optional_json::<Value>(&journal)?;
-    if prior
-        .as_ref()
-        .is_some_and(|v| v["complete"] == false && v["drafts"] != drafts)
-    {
+    if prior.as_ref().is_some_and(|v| {
+        v["complete"] == false && draft_identity(&v["drafts"]) != draft_identity(&drafts)
+    }) {
         return Err("resume the same pending chat drafts before changing the batch".into());
     }
     current(settings, &s)?;
@@ -661,26 +691,36 @@ pub async fn remember(settings: &Settings, input: RememberChatInput) -> Result<V
     }
     let client = remote::connect(settings).await?;
     let result=async {
-        if !remote::supports(&client,"submit_conversation_candidate").await?{return Err("upgrade the Pi to schema 6 before publishing chat lessons".into());}
-        let mut outcomes=Vec::new();
-        for l in &lessons {
+        if !remote::supports(&client,"assess_conversation_candidate").await?{return Err("upgrade the Pi to schema 7 for chronology-safe chat learning".into());}
+        // Inspect the complete batch before journalling any possible write.
+        let mut preflights=Vec::new();
+        for (l,draft) in lessons.iter().zip(&input.lessons) {
             current(settings,&s)?;
-            atomic_json(&journal,&json!({"complete":false,"revision":input.revision,"drafts":drafts,"outcomes":outcomes,"in_flight":l.id}))?;
             let old=remote::call(&client,"get_lesson",json!({"repository":s.repository,"id":l.id})).await?;
-            let outcome=if old["found"]==true {
+            if old["found"]==true {
                 let mut existing:Lesson=serde_json::from_value(old["lesson"]["lesson"].clone())?;
-                // Observation time is not content identity after completed-cache retention.
                 for (a,b) in existing.conversation_evidence.iter_mut().zip(&l.conversation_evidence){a.observed_at=b.observed_at.clone();}
                 if existing!=*l{return Err("chat lesson identity conflict; inspect stored provenance".into());}
-                json!({"id":l.id,"repository":s.repository,"outcome":"already_known"})
-            }else{
-                let receipt=remote::call(&client,"submit_conversation_candidate",json!({"lesson":l})).await?;
+                preflights.push(None);
+            } else {
+                let assessment=remote::call(&client,"assess_conversation_candidate",json!({"lesson":l})).await?;
+                validate_assessments(l,draft,&assessment)?;
+                preflights.push(Some(assessment["assessment_token"].clone()));
+            }
+        }
+        let mut outcomes=Vec::new();
+        for (l,token) in lessons.iter().zip(preflights) {
+            current(settings,&s)?;
+            let outcome=if let Some(token)=token {
+                atomic_json(&journal,&json!({"complete":false,"revision":input.revision,"drafts":drafts,"outcomes":outcomes,"in_flight":l.id}))?;
+                let receipt=remote::call(&client,"submit_conversation_candidate",json!({"lesson":l,"assessment_token":token})).await?;
                 if receipt["id"]!=l.id||receipt["repository"]!=s.repository||!matches!(receipt["outcome"].as_str(),Some("inserted"|"unchanged")){return Err("unexpected chat publication receipt; retry saved drafts".into());}
                 let got=remote::call(&client,"get_lesson",json!({"repository":s.repository,"id":l.id})).await?;
                 if got["found"]!=true||got["lesson"]["lesson"]!=serde_json::to_value(l)?{return Err("chat publication readback mismatch; retry saved drafts".into());}receipt
-            };outcomes.push(outcome);
+            }else{json!({"id":l.id,"repository":s.repository,"outcome":"already_known"})};
+            outcomes.push(outcome);
         }
-        let v=json!({"complete":true,"repository":s.repository,"revision":input.revision,"outcomes":outcomes,"manual_approval_required":false});finish(settings,&s,&input.revision,&v)?;Ok(v)
+        let v=json!({"complete":true,"repository":s.repository,"revision":input.revision,"outcomes":outcomes,"drafts":drafts,"manual_approval_required":false});finish(settings,&s,&input.revision,&v)?;Ok(v)
     }.await;
     let _ = client.cancel().await;
     result
@@ -746,6 +786,9 @@ pub async fn reconcile(settings: &Settings, mut input: ReconcileChatInput) -> Re
             claim: d.claim,
             scope: Default::default(),
             evidence_ids: d.evidence_ids.clone(),
+            knowledge_key: None,
+            assessment_token: None,
+            related_assessments: vec![],
         })
         .collect();
     let proofs: Vec<_> = proof_drafts
@@ -772,7 +815,7 @@ pub async fn reconcile(settings: &Settings, mut input: ReconcileChatInput) -> Re
     }
     let client = remote::connect(settings).await?;
     let result=async {
-        for name in ["submit_conversation_candidate","change_lesson","get_lesson_history"] {if !remote::supports(&client,name).await?{return Err("upgrade Pi before conversation corrections".into());}}
+        for name in ["assess_conversation_candidate","assess_lesson_change","change_lesson","get_lesson_history"] {if !remote::supports(&client,name).await?{return Err("upgrade Pi before conversation corrections".into());}}
         let mut completed=BTreeSet::new();let mut retired=BTreeSet::new();
         for c in &changes {
             let history=remote::call(&client,"get_lesson_history",json!({"repository":s.repository,"id":c.source_id,"change_id":c.id(),"limit":1})).await?;
@@ -784,6 +827,8 @@ pub async fn reconcile(settings: &Settings, mut input: ReconcileChatInput) -> Re
                 let got=remote::call(&client,"get_lesson",json!({"repository":s.repository,"id":id})).await?;
                 if got["found"]!=true||got["lesson"]["lesson"]["repository"]!=s.repository||got["lesson"]["lesson"]["status"]=="deprecated" {return Err("chat correction requires active scoped source and target lessons".into());}
             }
+            let checked=remote::call(&client,"assess_lesson_change",json!({"change":c})).await?;
+            if checked["allowed"]!=true{return Err("chronological change preflight failed".into());}
             if c.action!=ChangeAction::Conflict{retired.insert(c.source_id.clone());}
         }
         let mut outcomes=Vec::new();
@@ -798,6 +843,101 @@ pub async fn reconcile(settings: &Settings, mut input: ReconcileChatInput) -> Re
             outcomes.push(json!({"id":c.id(),"outcome":receipt["outcome"]}));
         }
         let value=json!({"complete":true,"revision":input.revision,"outcomes":outcomes,"drafts":drafts,"manual_approval_required":false});atomic_json(&path,&value)?;Ok(value)
+    }.await;
+    let _ = client.cancel().await;
+    result
+}
+
+fn capture_time(
+    item: &Value,
+    turn: &Value,
+    turn_id: &str,
+) -> Result<Option<crate::chronology::SourceTime>> {
+    use crate::chronology::{SourceTime, TimeBasis};
+    for (object, key, basis) in [
+        (item, "createdAt", TimeBasis::MessageTimestamp),
+        (turn, "startedAt", TimeBasis::TurnTimestamp),
+    ] {
+        if let Some(value) = object.get(key) {
+            let text = value
+                .as_str()
+                .ok_or("source dates must be RFC3339, never thread updatedAt or capture time")?;
+            let time = chrono::DateTime::parse_from_rfc3339(text)
+                .map_err(|_| "invalid source timestamp")?;
+            if time > chrono::Utc::now() {
+                return Err("source timestamp is in the future".into());
+            }
+            return Ok(Some(SourceTime {
+                at: time
+                    .with_timezone(&chrono::Utc)
+                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                basis,
+            }));
+        }
+    }
+    Ok(SourceTime::from_uuid(turn_id))
+}
+fn draft_identity(value: &Value) -> Value {
+    let mut value = value.clone();
+    if let Some(drafts) = value.as_array_mut() {
+        for draft in drafts {
+            if let Some(obj) = draft.as_object_mut() {
+                obj.remove("assessment_token");
+                obj.remove("related_assessments");
+            }
+        }
+    }
+    value
+}
+fn validate_assessments(lesson: &Lesson, draft: &ChatDraft, assessment: &Value) -> Result<()> {
+    let related = assessment["related_lessons"]
+        .as_array()
+        .ok_or("missing chronology assessment")?;
+    if draft.related_assessments.len() > 12 {
+        return Err("at most twelve related-lesson assessments".into());
+    }
+    if !related.is_empty()
+        && draft.assessment_token.as_deref() != assessment["assessment_token"].as_str()
+    {
+        return Err("existing same-key knowledge needs assessment: run assess_chat_lessons, read related lessons, and supply its token and related_assessments; retry identical lesson content".into());
+    }
+    let mut seen = BTreeSet::new();
+    for a in &draft.related_assessments {
+        if !seen.insert(&a.id) || !(15..=1000).contains(&a.reason.len()) || !safe_text(&a.reason) {
+            return Err(
+                "each related assessment needs a unique lesson ID and specific minimized reason"
+                    .into(),
+            );
+        }
+        let peer = related
+            .iter()
+            .find(|p| p["lesson"]["id"] == a.id)
+            .ok_or("related assessment is stale or outside this key/repository")?;
+        if matches!(a.relation, RelatedRelation::Correction) {
+            let peer: Lesson = serde_json::from_value(peer["lesson"].clone())?;
+            crate::chronology::guard_terminal(&lesson.conversation_evidence, &[peer])?;
+        }
+        if assessment["chronology"]["relation"] == "older_context"
+            && !matches!(
+                a.relation,
+                RelatedRelation::Historical | RelatedRelation::Conflict
+            )
+        {
+            return Err("older source must be assessed as historical or an unresolved conflict, not as current correction".into());
+        }
+    }
+    if seen.len() != related.len() {
+        return Err("assess every returned related lesson before publication".into());
+    }
+    Ok(())
+}
+pub async fn assess_lessons(settings: &Settings, input: RememberChatInput) -> Result<Value> {
+    let lessons = build(settings, &input.repository, &input.revision, &input.lessons)?;
+    let client = remote::connect(settings).await?;
+    let result=async {
+        if !remote::supports(&client,"assess_conversation_candidate").await?{return Err("upgrade Pi to schema 7 for chronological assessment".into());}
+        let mut assessments=Vec::new();for lesson in lessons {let mut a=remote::call(&client,"assess_conversation_candidate",json!({"lesson":lesson})).await?;a["candidate_id"]=json!(lesson.id);assessments.push(a);}
+        Ok(json!({"repository":input.repository,"revision":input.revision,"assessments":assessments,"guidance":"Read returned full records. Supply the token and a consistent/historical/conflict/correction assessment for every peer. Source chronology does not prove correctness. Existing keyless legacy advice needs separate recall."}))
     }.await;
     let _ = client.cancel().await;
     result

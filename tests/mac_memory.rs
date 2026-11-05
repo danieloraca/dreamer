@@ -439,7 +439,7 @@ async fn mac_stdio_exposes_workflow_tools_without_opening_github_or_pi() {
     command.arg("mac").arg("--settings").arg(path).arg("mcp");
     let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 11);
+    assert_eq!(tools.len(), 12);
     let error = client
         .call_tool(
             CallToolRequestParams::new("recall_knowledge")
@@ -1330,6 +1330,9 @@ async fn older_pi_fallback_uses_the_same_exclusion_guard_and_rejects_scoped_writ
             repository: REPO.into(),
             revision,
             lessons: vec![ChatDraft {
+                knowledge_key: Some("fixture.staged-access".into()),
+                assessment_token: None,
+                related_assessments: vec![],
                 summary: "Preserve existing access until the replacement is tested.".into(),
                 applies_when: "For staged identity changes with explicit user direction.".into(),
                 claim: dreamer::conversation::ConversationClaim::Decision,
@@ -1341,7 +1344,7 @@ async fn older_pi_fallback_uses_the_same_exclusion_guard_and_rejects_scoped_writ
     )
     .await
     .unwrap_err();
-    assert!(error.to_string().contains("upgrade the Pi to schema 6"));
+    assert!(error.to_string().contains("upgrade the Pi to schema 7"));
     stop.cancel();
     task.await.unwrap();
 }

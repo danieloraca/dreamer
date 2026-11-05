@@ -113,6 +113,15 @@ pub enum MacCommand {
         #[arg(long, required = true)]
         id: Vec<String>,
     },
+    /// Assess inspected chat drafts against current Pi knowledge, without publishing.
+    AssessChat {
+        #[arg(long)]
+        repository: String,
+        #[arg(long)]
+        revision: String,
+        #[arg(long)]
+        file: PathBuf,
+    },
     /// Preview source-checked chat lessons locally, without contacting the Pi.
     PreviewChat {
         #[arg(long)]
@@ -224,6 +233,10 @@ pub async fn run(path: PathBuf, command: MacCommand) -> std::result::Result<(), 
                 activity::track(&settings,"prepare_chat_learning",&context,async {conversations::prepare(&settings,input)}).await?
             }
             MacCommand::ReadChat {repository,revision,id} => conversations::read(&settings,conversations::ChatReadInput{repository,revision,ids:id})?,
+            MacCommand::AssessChat {repository,revision,file} => {
+                let lessons=serde_json::from_slice(&fs::read(file)?)?;
+                conversations::assess_lessons(&settings,conversations::RememberChatInput{repository,revision,lessons,skip_reason:None}).await?
+            }
             MacCommand::PreviewChat {repository,revision,file} => {
                 let drafts: Vec<conversations::ChatDraft>=serde_json::from_slice(&fs::read(file)?)?;
                 serde_json::to_value(conversations::build(&settings,&repository,&revision,&drafts)?)?

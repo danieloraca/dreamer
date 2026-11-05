@@ -56,6 +56,8 @@ pub struct Lesson {
         skip_serializing_if = "crate::retrieval::LessonScope::is_empty"
     )]
     pub scope: crate::retrieval::LessonScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knowledge_key: Option<String>,
     pub provenance: Provenance,
     #[serde(default)]
     pub evidence: Vec<Evidence>,
@@ -68,6 +70,8 @@ pub struct StoredLesson {
     pub lesson: Lesson,
     /// UTC timestamp assigned by SQLite, independent of producer claims.
     pub stored_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chronology: Option<crate::chronology::ChronologySummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<crate::lifecycle::LifecycleSummary>,
 }
@@ -107,6 +111,15 @@ impl Lesson {
     pub fn validate(&self) -> Result<(), &'static str> {
         validate_repository(&self.repository)?;
         self.scope.validate()?;
+        if self
+            .knowledge_key
+            .as_deref()
+            .is_some_and(|key| !crate::chronology::valid_key(key))
+        {
+            return Err(
+                "knowledge_key must be a narrow lowercase claim/context key (3–120 characters)",
+            );
+        }
         if [
             &self.id,
             &self.repository,

@@ -20,7 +20,12 @@ fn chat() -> Lesson {
         "For staged access changes; configuration readback is separate from customer acceptance."
             .into();
     l.evidence.clear();
+    l.knowledge_key = Some("fixture.staged-access".into());
     l.conversation_evidence = vec![ConversationEvidence {
+        source_time: Some(dreamer::chronology::SourceTime {
+            at: "2026-01-01T00:00:00Z".into(),
+            basis: dreamer::chronology::TimeBasis::MessageTimestamp,
+        }),
         provider: "codex".into(),
         thread_id: THREAD.into(),
         turn_id: "turn-1".into(),
@@ -47,14 +52,14 @@ fn schema_five_upgrade_preserves_pr_json_and_accepts_mixed_sources() {
     drop(store);
     let c = rusqlite::Connection::open(&path).unwrap();
     c.execute_batch(
-        "DROP TABLE conversation_evidence; DELETE FROM schema_migrations WHERE version=6;",
+        "DROP TABLE lesson_knowledge_keys; DELETE FROM schema_migrations WHERE version=7; DROP TABLE conversation_evidence; DELETE FROM schema_migrations WHERE version=6;",
     )
     .unwrap();
     drop(c);
     assert_eq!(SqliteStore::check_file(&path, true).unwrap(), 5);
     assert!(SqliteStore::open_read_only(&path).is_err());
     let mut store = SqliteStore::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 6);
+    assert_eq!(store.schema_version().unwrap(), 7);
     assert_eq!(store.get(REPO, &old.id).unwrap().unwrap(), before);
     assert!(
         serde_json::to_value(&before.lesson)
@@ -109,6 +114,13 @@ fn chat_recall_and_correction_history_remain_scoped_and_immutable() {
         evidence: vec![],
         conversation_evidence: l.conversation_evidence.clone(),
     };
+    let mut change = change;
+    change.conversation_evidence[0].claim = ConversationClaim::Correction;
+    change.conversation_evidence[0]
+        .source_time
+        .as_mut()
+        .unwrap()
+        .at = "2026-01-02T00:00:00Z".into();
     store.change_lesson(&change).unwrap();
     assert!(store.recall(&query).unwrap().lessons.is_empty());
     assert_eq!(
@@ -198,6 +210,9 @@ mod mac {
     }
     fn draft() -> ChatDraft {
         ChatDraft {
+            knowledge_key: Some("fixture.staged-access".into()),
+            assessment_token: None,
+            related_assessments: vec![],
             summary: chat().summary,
             applies_when: chat().applies_when,
             claim: ConversationClaim::Decision,
@@ -371,6 +386,12 @@ mod mac {
             conversations::prepare(&s, input()).unwrap()["already_processed"],
             true
         );
+        let mut newer = input();
+        newer.page.as_mut().unwrap()["turns"][0]["startedAt"] = json!("2026-01-02T00:00:00Z");
+        newer.page.as_mut().unwrap()["turns"][0]["items"][0]["createdAt"] =
+            json!("2026-01-02T00:00:00Z");
+        let corrected = conversations::prepare(&s, newer).unwrap();
+        read(&s, &corrected);
         let correction = ChatChangeDraft {
             source_id: l.id.clone(),
             action: ChangeAction::Retire,
@@ -386,7 +407,7 @@ mod mac {
                 &s,
                 ReconcileChatInput {
                     repository: REPO.into(),
-                    revision: v["revision"].as_str().unwrap().into(),
+                    revision: corrected["revision"].as_str().unwrap().into(),
                     changes: vec![correction]
                 }
             )
@@ -472,6 +493,7 @@ mod mac {
         let v = conversations::prepare(&s, input()).unwrap();
         read(&s, &v);
         let mut second = draft();
+        second.knowledge_key = Some("fixture.replacement-validation".into());
         second.summary =
             "Validate a replacement identity before removing the existing account access.".into();
         let drafts = vec![draft(), second];
@@ -499,6 +521,12 @@ mod mac {
             .unwrap();
         assert_eq!(resumed["outcomes"][0]["outcome"], "already_known");
         assert_eq!(resumed["outcomes"][1]["outcome"], "inserted");
+        let mut newer = input();
+        newer.page.as_mut().unwrap()["turns"][0]["startedAt"] = json!("2026-01-02T00:00:00Z");
+        newer.page.as_mut().unwrap()["turns"][0]["items"][0]["createdAt"] =
+            json!("2026-01-02T00:00:00Z");
+        let v = conversations::prepare(&s, newer).unwrap();
+        read(&s, &v);
         let corrections: Vec<_> = lessons
             .iter()
             .map(|l| ChatChangeDraft {
@@ -526,7 +554,15 @@ mod mac {
             .is_err()
         );
         assert_eq!(
-            conversations::prepare(&s, input()).unwrap()["pending_reconciliation"],
+            conversations::prepare(&s, {
+                let mut page = input();
+                page.page.as_mut().unwrap()["turns"][0]["startedAt"] =
+                    json!("2026-01-02T00:00:00Z");
+                page.page.as_mut().unwrap()["turns"][0]["items"][0]["createdAt"] =
+                    json!("2026-01-02T00:00:00Z");
+                page
+            })
+            .unwrap()["pending_reconciliation"],
             true
         );
         assert!(
@@ -699,6 +735,122 @@ mod mac {
         assert!(serde_json::to_vec(&recall).unwrap().len() <= 12_000);
         assert_eq!(recall["lessons"][0]["source_chats"][0], THREAD);
         client.cancel().await.unwrap();
+        stop.cancel();
+        task.await.unwrap();
+    }
+
+    #[test]
+    fn capture_keeps_source_timestamp_precision_and_unknown_dates_explicit() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = settings(dir.path());
+        let known = conversations::prepare(&s, input()).unwrap();
+        let read = conversations::read(
+            &s,
+            ChatReadInput {
+                repository: REPO.into(),
+                revision: known["revision"].as_str().unwrap().into(),
+                ids: vec!["user-1".into(), "assistant-1".into()],
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            read["sources"][0]["source_time"]["at"],
+            "2026-01-01T00:00:00.000Z"
+        );
+        assert_eq!(
+            read["sources"][0]["source_time"]["basis"],
+            "message_timestamp"
+        );
+        assert_eq!(read["sources"][1]["source_time"]["basis"], "turn_timestamp");
+        let mut undated = input();
+        undated.page.as_mut().unwrap()["turns"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("startedAt");
+        undated.page.as_mut().unwrap()["turns"][0]["items"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("createdAt");
+        let view = conversations::prepare(&s, undated).unwrap();
+        let view = conversations::read(
+            &s,
+            ChatReadInput {
+                repository: REPO.into(),
+                revision: view["revision"].as_str().unwrap().into(),
+                ids: vec!["user-1".into()],
+            },
+        )
+        .unwrap();
+        assert!(view["sources"][0].get("source_time").is_none());
+        let mut bad = input();
+        bad.page.as_mut().unwrap()["turns"][0]["items"][0]["createdAt"] = json!("bad date");
+        assert!(conversations::prepare(&s, bad).is_err());
+    }
+    #[tokio::test]
+    async fn backfill_requires_related_assessment_and_old_corrections_cannot_replace_newer() {
+        use dreamer::mac::conversations::{RelatedAssessment, RelatedRelation};
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = settings(dir.path());
+        let (stop, task, db) = backend(&mut s, dir.path()).await;
+        let mut newer = input();
+        let thread = "00000000-0000-0000-0000-000000000002";
+        newer.thread_id = thread.into();
+        newer.page.as_mut().unwrap()["thread"]["id"] = json!(thread);
+        newer.page.as_mut().unwrap()["turns"][0]["items"][0]["createdAt"] =
+            json!("2026-02-01T00:00:00Z");
+        let current = conversations::prepare(&s, newer).unwrap();
+        read(&s, &current);
+        let published = conversations::remember(&s, remember(&current, vec![draft()]))
+            .await
+            .unwrap();
+        let newer_id = published["outcomes"][0]["id"].as_str().unwrap().to_owned();
+        let older = conversations::prepare(&s, input()).unwrap();
+        read(&s, &older);
+        assert!(
+            conversations::remember(&s, remember(&older, vec![draft()]))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("needs assessment")
+        );
+        let assessed = conversations::assess_lessons(&s, remember(&older, vec![draft()]))
+            .await
+            .unwrap();
+        let a = &assessed["assessments"][0];
+        assert_eq!(a["chronology"]["relation"], "older_context");
+        let mut reviewed = draft();
+        reviewed.assessment_token = Some(a["assessment_token"].as_str().unwrap().into());
+        reviewed.related_assessments=vec![RelatedAssessment{id:newer_id.clone(),relation:RelatedRelation::Historical,reason:"This older conversation records historical advice; it does not replace the later source.".into()}];
+        let old = conversations::remember(&s, remember(&older, vec![reviewed.clone()]))
+            .await
+            .unwrap();
+        let old_id = old["outcomes"][0]["id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            conversations::remember(&s, remember(&older, vec![reviewed]))
+                .await
+                .unwrap()["outcomes"][0]["outcome"],
+            "already_known"
+        );
+        let correction=ChatChangeDraft{source_id:newer_id.clone(),action:ChangeAction::Retire,target_id:None,reason:"The old source contradicts the later migration instruction in this synthetic fixture.".into(),claim:ConversationClaim::Correction,evidence_ids:vec!["user-1".into()]};
+        assert!(
+            conversations::reconcile(
+                &s,
+                ReconcileChatInput {
+                    repository: REPO.into(),
+                    revision: older["revision"].as_str().unwrap().into(),
+                    changes: vec![correction]
+                }
+            )
+            .await
+            .is_err()
+        );
+        let store = SqliteStore::open_read_only(&db).unwrap();
+        assert_eq!(
+            store.get(REPO, &newer_id).unwrap().unwrap().lesson.status,
+            dreamer::lesson::LessonStatus::Candidate
+        );
+        let old = store.get(REPO, &old_id).unwrap().unwrap();
+        assert_eq!(old.chronology.unwrap().relation, "older_context");
         stop.cancel();
         task.await.unwrap();
     }

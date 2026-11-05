@@ -22,13 +22,13 @@ Set it false to disable new selected-chat operations. It does not erase retained
 local excerpts or knowledge already stored on the Pi. No new token is required.
 
 Commit/push the source changes normally, then pull and run `make deploy` on the Pi.
-The installer backs up before additive schema 6. Existing PR data and lifecycle
+The installer backs up before additive schema 7. Existing PR data and lifecycle
 history are preserved; old binaries cannot open the upgraded database. Rollback
 requires the matching old binary and a checked pre-upgrade snapshot, keeping the
 new database separately. Update other Mac clients before they read chat records:
 old clients with strict JSON decoding may reject the new evidence field.
 
-Start a new Codex task to load updated tools/guidance. Chat writes refuse an older
+Start a new Codex task to load updated tools/guidance. Chronology-safe chat writes require schema 7 and refuse an older
 Pi before mutation. Existing PR recall still works against it. Deployment is not
 complete until the Pi has actually been updated; a local release build is not a
 Pi runtime test.
@@ -48,12 +48,17 @@ Codex's `read_thread` supplies pages; Dreamer does not secretly read chat files.
    `already_processed` avoids re-extraction of identical retained evidence.
 3. `read_chat_evidence` delivers one to eight sanitized excerpts and records which
    sources were inspected. Check current docs/code and existing knowledge.
-4. `remember_chat_lessons` publishes up to ten supported drafts, or records a
+4. Add a narrow stable `knowledge_key`. `assess_chat_lessons` returns related
+   same-key knowledge (plus legacy keyless advice from the same chat), source
+   chronology and an assessment token. Read the records; give each peer an agent
+   assessment as consistent, historical, conflict or correction. This is automatic
+   agent work, with no per-lesson user approval.
+5. `remember_chat_lessons` publishes up to ten supported drafts, or records a
    specific no-new-knowledge skip reason. Decisions/corrections require supporting
    user statements. Observed outcomes require an inspected actual result and a
    second source. Hypotheses require `Hypothesis (unverified): ` in their summary.
    These are structural checks; the agent remains responsible for interpretation.
-5. Exact Pi readback precedes completion. Retry identical drafts after an uncertain
+6. Exact Pi readback precedes completion. Retry identical drafts after an uncertain
    write. `reconcile_chat_lessons` uses the same evidence for retire/supersede/
    conflict events and can resume saved pending corrections when changes are
    omitted. Unfinished corrections block page completion.
@@ -114,3 +119,66 @@ SETTINGS="$HOME/.config/dreamer/mac.toml"
 `preview-chat` validates and prints candidates locally without contacting the Pi.
 `remember-chat` publishes; `reconcile-chat` corrects prior knowledge. The normal
 agent path uses MCP directly. A preview is not stored knowledge.
+
+## Chronology and backfilling (schema 7)
+
+Capture/storage times describe when Dreamer saw something. They are not when the
+conversation established it. `source_time` stores the original time and basis:
+`message_timestamp`, `turn_timestamp` or `uuid_v7_turn_start`. The collector accepts
+RFC3339 item `createdAt` or turn `startedAt` fields when the source actually
+supplies them. Otherwise a valid UUIDv7 turn ID supplies a labelled generation-time
+estimate ([RFC 9562 §5.7](https://www.rfc-editor.org/rfc/rfc9562.html#section-5.7)).
+It is not an exact message or acceptance timestamp. Missing dates stay unknown;
+a thread's updated time and the ingestion time are never substituted. Legacy
+payloads are unchanged; their valid UUIDv7 turn IDs can supply a read-time estimate.
+Source timestamps are asserted metadata, not authenticated proof of truth.
+
+Use a stable narrow key such as `auth.external-idp.account-matching`; different
+contexts need different keys. Do not use a broad component, date, chat ID or new
+key to evade existing advice. The key is optional for legacy records/exact retries
+and required for new chat lessons. Schema 7 adds an indexed key table; it does not
+rewrite old lessons, source JSON, IDs, timestamps or lifecycle records. Legacy
+keyless records from other chats still need ordinary recall: keys and dates are
+not a semantic contradiction detector.
+
+`assess_chat_lessons` (CLI `assess-chat`, Pi `assess_conversation_candidate`)
+returns up to twelve related full records, capped at 100 KB, and a token bound to
+current related knowledge. Supply that `assessment_token` and `related_assessments`
+with each draft: `id`, `relation` (`consistent`, `historical`, `conflict`,
+`correction`) and a specific minimized `reason`. Older context must be historical
+or an unresolved conflict. An unsupported new draft fails before any write;
+publication preflights the complete batch, then the Pi checks the token again in
+the write transaction. Concurrent or same-batch same-key changes can invalidate
+it: reassess and retry the same lesson content with refreshed assessment metadata.
+Receipts preserve partial outcomes; no completion is claimed for an unfinished
+batch. Agent assessment reasons stay in the private Mac receipt, not a truth label
+or new permission on the Pi.
+
+Stored/full/compact views expose source range, date precision, older/newer/
+overlapping/approximate/undated context and bounded related IDs. Competing advice stays
+provisional and visible until explicitly reconciled; timestamps alone do not
+silently choose a winner. Ranked retrieval uses source chronology to break equal
+relevance scores, not insertion time. Candidate selection uses deterministic IDs;
+its existing bounded-pool/truncation warning still applies. Normal compact recall
+keeps its 12 KB cap. Dashboard details label source time separately from capture
+and storage times. An older item can remain relevant to an older task context;
+read applicability and newer related advice before applying it.
+
+The Pi rejects chat-backed retire/supersede unless the evidence is an explicit
+correction or inspected outcome with known message dates strictly later than all
+affected source and recorded conflict evidence. The replacement itself is not
+being displaced and may cite the same correcting source; other active related
+advice is still checked. Unknown/mixed-source dates and
+turn-start estimates cannot establish exact precedence; record a conflict or use
+independently inspected current PR evidence. `assess_lesson_change` preflights
+this rule; `change_lesson` rechecks it atomically. Existing PR-only correction
+behavior is unchanged; PR source chronology is not newly inferred here. Exact
+already-applied retries remain no-ops, even after newer related advice arrives.
+A legacy pending unsafe change can now be refused; never fabricate dates or mark
+that batch completed. Complete safe pending work before rollout where possible.
+
+Update the Mac client/guidance, deploy schema 7 on the Pi and start a new Codex
+task. Updated chat publication refuses schema 6 before knowledge mutations.
+Read-only recall still works against schema 6. Update other strict JSON clients
+before publishing the additional metadata; rollback needs a matching old binary
+and a checked pre-upgrade snapshot, retaining the new database separately.

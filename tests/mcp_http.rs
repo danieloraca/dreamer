@@ -171,8 +171,8 @@ async fn sdk_clients_use_read_and_write_tokens_against_the_same_endpoint() {
     let (url, shutdown, task) = start(&config, true).await;
     let reader = connect(&url, READ).await;
     let writer = connect(&url, WRITE).await;
-    assert_eq!(reader.list_all_tools().await.unwrap().len(), 6);
-    assert_eq!(writer.list_all_tools().await.unwrap().len(), 10);
+    assert_eq!(reader.list_all_tools().await.unwrap().len(), 8);
+    assert_eq!(writer.list_all_tools().await.unwrap().len(), 12);
     let report = json!({"repository":REPO,"id":"a".repeat(64),"phase":"capture","state":"failed","client_started_at":"2026-11-05T12:00:00Z","client_finished_at":"2026-11-05T12:01:00Z","pr":12});
     assert!(
         reader
@@ -468,5 +468,107 @@ async fn lifecycle_http_enforces_writer_role_scope_and_exposes_audit_after_resta
     );
     reader.cancel().await.unwrap();
     shutdown.cancel();
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn chronological_chat_guards_apply_to_direct_http_callers_and_assessment_is_read_only() {
+    let (_directory, _path, config) = setup();
+    let (url, stop, task) = start(&config, true).await;
+    let reader = connect(&url, READ).await;
+    let writer = connect(&url, WRITE).await;
+    let mut lesson: Value = serde_json::from_str(FIXTURE).unwrap();
+    lesson["id"] = json!("chat-date-old");
+    lesson["knowledge_key"] = json!("account.migration-route");
+    lesson["evidence"] = json!([]);
+    lesson["conversation_evidence"] = json!([{"provider":"codex","thread_id":"00000000-0000-0000-0000-000000000001","turn_id":"turn-1","item_id":"user-1","source_url":"codex://threads/00000000-0000-0000-0000-000000000001","observed_at":"2026-11-05T11:00:00Z","source_time":{"at":"2026-01-01T00:00:00Z","basis":"message_timestamp"},"content_sha256":"a".repeat(64),"kind":"user_statement","claim":"decision","description":"Synthetic user guidance for a scoped migration decision."}]);
+    let a = call(
+        &reader,
+        "assess_conversation_candidate",
+        json!({"lesson":lesson}),
+    )
+    .await;
+    assert_ne!(a.is_error, Some(true));
+    assert!(
+        reader
+            .call_tool(
+                CallToolRequestParams::new("submit_conversation_candidate")
+                    .with_arguments(json!({"lesson":lesson}).as_object().unwrap().clone())
+            )
+            .await
+            .is_err()
+    );
+    let result = call(
+        &writer,
+        "submit_conversation_candidate",
+        json!({"lesson":lesson}),
+    )
+    .await;
+    assert_ne!(result.is_error, Some(true));
+    let mut newer = lesson.clone();
+    newer["id"] = json!("chat-date-new");
+    newer["summary"] =
+        json!("Use the replacement migration route after a later explicit account decision.");
+    newer["conversation_evidence"][0]["source_time"]["at"] = json!("2026-02-01T00:00:00Z");
+    assert_eq!(
+        call(&writer, "submit_candidate", json!({"lesson":newer}))
+            .await
+            .is_error,
+        Some(true)
+    );
+    let a = call(
+        &reader,
+        "assess_conversation_candidate",
+        json!({"lesson":newer}),
+    )
+    .await
+    .structured_content
+    .unwrap();
+    let stored = call(
+        &writer,
+        "submit_conversation_candidate",
+        json!({"lesson":newer,"assessment_token":a["assessment_token"]}),
+    )
+    .await;
+    assert_ne!(stored.is_error, Some(true));
+    let mut proof = lesson["conversation_evidence"].clone();
+    proof[0]["claim"] = json!("correction");
+    let change = json!({"repository":REPO,"source_id":"chat-date-new","action":"retire","target_id":null,"reason":"The earlier conversation proposes reverting the later account migration decision.","producer":"synthetic direct caller","evidence":[],"conversation_evidence":proof});
+    assert_eq!(
+        call(&reader, "assess_lesson_change", json!({"change":change}))
+            .await
+            .is_error,
+        Some(true)
+    );
+    assert_eq!(
+        call(&writer, "change_lesson", json!({"change":change}))
+            .await
+            .is_error,
+        Some(true)
+    );
+    let got = call(
+        &reader,
+        "get_lesson",
+        json!({"repository":REPO,"id":"chat-date-new"}),
+    )
+    .await
+    .structured_content
+    .unwrap();
+    assert_eq!(got["lesson"]["lesson"]["status"], "candidate");
+    let mut foreign = lesson;
+    foreign["repository"] = json!("foreign/repository");
+    assert_eq!(
+        call(
+            &reader,
+            "assess_conversation_candidate",
+            json!({"lesson":foreign})
+        )
+        .await
+        .is_error,
+        Some(true)
+    );
+    reader.cancel().await.unwrap();
+    writer.cancel().await.unwrap();
+    stop.cancel();
     task.await.unwrap();
 }

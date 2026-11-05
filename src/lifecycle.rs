@@ -67,6 +67,7 @@ impl LessonChange {
             applies_when: "Lesson lifecycle evidence".into(),
             status: LessonStatus::Candidate,
             scope: Default::default(),
+            knowledge_key: None,
             provenance: Provenance {
                 producer: self.producer.clone(),
                 method: ExtractionMethod::Manual,

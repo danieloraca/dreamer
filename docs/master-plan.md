@@ -248,8 +248,8 @@ Private collection and repeat-trial artifacts remain under ignored `data/`.
 
 ## Milestone 5: learn from Codex conversations
 
-Status: implemented and verified locally on 5 November 2026; schema-6 Pi deployment
-and first real-chat publication remain pending. The Mac implementation supports
+Status: deployed and first real-chat publication/readback verified on 5 November
+2026. The Pi advertises the schema-6 chat write capability. The Mac supports
 selected Codex pages, typed evidence, local preview, automatic publication and
 correction tools. No background/full-history crawler or other chat adapter exists.
 
@@ -337,7 +337,7 @@ truncated/status-only result rejection, partial candidate/correction recovery,
 old-Pi write refusal, MCP/CLI publication, preview, compact recall and retention.
 No production lessons were changed for verification.
 
-The real CM-1008 demonstration retrieved two completed turns with more history
+The initial local CM-1008 demonstration retrieved two completed turns with more history
 still paginated. Four sanitized message sources supplied one explicitly
 unverified process hypothesis with native citations in a local preview. No
 observed technical/business outcome was established and no chat lesson was
@@ -346,6 +346,96 @@ The updated Mac client and managed skill are installed with conversation learnin
 enabled. A fresh process discovered eleven tools, including the four chat tools.
 All three configured repository scopes and the private writer file were preserved.
 Read-only live Pi recall still returned ranked results (an empty relevant query,
-556 bytes); no production knowledge writes were made. Deploy schema 6 on the Pi,
-then use a fresh Codex task for the first source-checked publication/readback.
+556 bytes); no production knowledge writes were made during that initial check.
 See [conversation workflow and rollout](conversations.md).
+
+Rollout verified on 5 November 2026 after Dan deployed: writer discovery now lists
+`submit_conversation_candidate`. A fresh bounded three-turn CM-1008 page supplied
+three inspected citations for one provisional external-identity-migration lesson,
+`chat-cd71219dd9db8d34af7a8e18`, in the Gecko-API scope. Its summary is explicitly
+labelled `Hypothesis (unverified)` and excludes local-auth and AI Access-ID
+issuance. Candidate publication completed with exact Pi readback; independent
+get, normal ranked recall and the read-only dashboard API all returned it. The
+dashboard reports one source chat. Raw transcripts and customer details were not
+uploaded. This verifies the first selected-page learning path, not full chat
+backfill, a verified technical fix, or improved code quality. Older turns remain
+paginated. The private rollout receipt is in ignored
+`data/chat-preview/cm-1008-first-publication/`.
+
+## Conversation chronology safeguards
+
+Status: implemented and verified locally; schema-7 Pi rollout remains pending.
+Baseline `75cb901`, preserving the prior uncommitted rollout status. Full plan: persistence, MCP compatibility
+and destructive correction safety interact, so this is more than a UI change.
+
+Keep source time distinct from capture/storage time, with an explicit basis and
+unknown dates preserved. Read source timestamps where supplied; a valid UUIDv7
+turn identifier can supply a labelled turn-start estimate (RFC 9562 section 5.7),
+not an exact message/acceptance time. Never use capture time or a thread's last
+updated time as the original evidence date. Preserve legacy source JSON/IDs.
+
+Add optional repository-scoped narrow knowledge keys in additive schema 7.
+New chat publication requires a key; legacy candidates still round-trip and exact
+retries remain valid. A scoped assessment tool finds active same-key peers before
+publication. Mac learning must surface these peers for agent assessment rather
+than silently storing competing advice. Metadata and bounded recall/dashboard
+warnings expose older, overlapping, approximate and undated competing material independently
+of ingestion order. Keys identify a specific claim and applicability context;
+they are not broad components. Semantic equivalence/conflict still needs agent
+judgment and current docs/code, not timestamps alone.
+
+The Pi enforces terminal chat correction safety inside the write transaction:
+require explicit correction/inspected-outcome evidence, exact message dates newer
+than the affected lesson and other related advice, and no ambiguous historical
+source. The replacement is not being displaced and may cite that same correcting
+source. Turn-start estimates alone never authorize a terminal transition.
+Older/equal/unknown evidence can add a conflict/history warning, not silently
+retire or supersede current knowledge. Preserve PR behavior and all original
+lesson/history data. Check retries before new transition guards; failed batches
+retain their existing journal and cannot advance completion. Add new capability
+discovery so an updated Mac stops before mutating an older Pi.
+
+Verify old/new ingestion orders against identical fixtures, legacy schema-6
+preservation and retries, source-time extraction/unknown dates, topic isolation,
+competing/consistent dispositions, older/equal/unknown correction rejection,
+fresh correction and unresolved conflict behavior, direct MCP/CLI enforcement,
+compact budgets, dashboard labels and Mac interrupted batches. Run both Rust
+suites, Python installer/backup tests, formatting, Clippy, skill validation,
+native Mac release and ARM64 server type-check. Do not mutate production lessons
+for verification. Update Mac guidance/client after tests; Dan deploys the Pi.
+
+Verification: 101 Rust tests with Mac features, 71 default/server tests and 12
+Python installer/backup tests passed. Formatting, strict Clippy, skill validation,
+dashboard syntax and synthetic DOM chronology/navigation/link checks passed.
+Native Mac release and ARM64 server type-check passed (not an ARM linked binary
+or a physical Pi runtime test). A real installed v6 client created a disposable
+cache; the new client read it and produced identical legacy candidate JSON/ID.
+No production knowledge was modified for these checks.
+
+New read-only Pi tools `assess_conversation_candidate` and `assess_lesson_change`
+expose comparison/preflight; Mac `assess_chat_lessons`/`assess-chat` supports the
+agent's related-lesson assessment. Full batches preflight before candidate writes;
+transactional checks reject stale peer snapshots. The target lesson is excluded
+from displaced-peer date checks so one fresh correcting source can both create a
+replacement and supersede the old record. Exact retries are checked first.
+Assessments have at most twelve peers and a 100 KB reply cap; normal compact
+recall still has its 12 KB cap and shorter related-ID previews with truncation
+warnings. Same-key legacy peers are surfaced without changing their content.
+
+This does not infer semantic contradictions across arbitrary different keys,
+authenticate source assertions, automatically declare newer advice correct, or
+add PR source dating. Agents must use stable claim/context keys and inspect
+current documentation/code. Unknown/approximate chat precedence produces context
+or conflicts; safe correction may need independently inspected current PR
+sources. No automatic full-history backfill, background model or approval queue
+was added. Deploy schema 7 after pushing/pulling the source; keep the installer's
+pre-upgrade snapshot for a matched-binary rollback. New chat writes stop before
+knowledge mutation against schema 6; read-only recall remains compatible.
+
+Mac installation verified: a fresh process exposed twelve tools, including
+`assess_chat_lessons`; installed skill and release binary match the maintained
+versions. Three repository scopes, conversation enablement and the private writer
+file were preserved. Read-only live ranked recall still returned the original
+CM-1008 lesson. A read-only assessment attempt correctly refused the current
+schema-6 Pi with a schema-7 upgrade message; no production knowledge was modified.
+The schema-7 source changes remain uncommitted/unpushed and undeployed on the Pi.

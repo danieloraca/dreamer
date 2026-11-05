@@ -68,6 +68,14 @@
     for (const [label, values] of [['Components',scope.components],['Paths',scope.paths],['Excluded terms',scope.excluded_terms]]) {
       if (values?.length) detail.append(node('p','scope-values',`${label}: ${values.join(', ')}`));
     }
+    const chronology=stored.chronology;
+    if (chronology) {
+      detail.append(node('p','scope-values',`Knowledge key: ${chronology.knowledge_key || 'Legacy/unclassified'}`));
+      detail.append(node('p','scope-values',`Source time: ${chronology.source_from || 'Unknown'} to ${chronology.source_to || 'Unknown'} · ${chronology.relation} · ${chronology.source_time_precision || 'unknown'}`));
+      if (chronology.needs_reconciliation) detail.append(node('p','candidate-note',chronology.guidance));
+      for (const id of chronology.related_lesson_ids || []) {const button=node('button','text-button',`Related advice: ${id} ↗`);button.type='button';button.addEventListener('click',()=>openLesson(id));detail.append(button);}
+      if (chronology.related_truncated) detail.append(node('p','metric-note','More related advice exists; reconcile before publication.'));
+    }
     const lifecycle = stored.lifecycle || {};
     function relation(label,id) {
       const button = node('button','text-button relation-button',`${label}: ${id} ↗`);
@@ -90,7 +98,7 @@
     for (const item of sources) {
       if (item.provider === 'codex') {
         const card=node('article','evidence-card');
-        card.append(node('div','evidence-meta',`Codex conversation · ${item.claim} · ${item.kind}`),sourceLink(item.source_url,'Open source chat'),node('p','',item.description),node('code','',`Turn ${item.turn_id} · Item ${item.item_id}`),node('code','',`Digest ${item.content_sha256}`),node('span','',`Observed ${date(item.observed_at)} · Excerpt, not independently verified`));
+        card.append(node('div','evidence-meta',`Codex conversation · ${item.claim} · ${item.kind}`),sourceLink(item.source_url,'Open source chat'),node('p','',item.description),node('code','',`Turn ${item.turn_id} · Item ${item.item_id}`),node('code','',`Digest ${item.content_sha256}`),node('span','',`Source ${item.source_time ? date(item.source_time.at)+' ('+item.source_time.basis+')' : 'unknown; inspect chronology'} · Captured ${date(item.observed_at)} · Excerpt, not independently verified`));
         evidence.append(card); continue;
       }
       const card = node('article', 'evidence-card');

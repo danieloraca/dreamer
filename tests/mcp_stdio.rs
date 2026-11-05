@@ -95,6 +95,8 @@ async fn sdk_client_discovers_reads_and_enforces_read_only_repository_scope() {
     assert_eq!(
         names,
         [
+            "assess_lesson_change",
+            "assess_conversation_candidate",
             "list_repositories",
             "search_lessons",
             "get_lesson",
@@ -107,7 +109,7 @@ async fn sdk_client_discovers_reads_and_enforces_read_only_repository_scope() {
         let annotations = tool.annotations.unwrap();
         assert_eq!(annotations.read_only_hint, Some(true));
         assert_eq!(annotations.open_world_hint, Some(false));
-        if tool.name != "list_repositories" {
+        if tool.name != "list_repositories" && !tool.name.starts_with("assess_") {
             assert!(
                 tool.input_schema["required"]
                     .as_array()
@@ -298,7 +300,7 @@ async fn legacy_initialize_and_clean_eof_work_over_raw_json_rpc() {
         .await
         .unwrap();
     let tools = raw_request(&mut stdin, &mut stdout, 2, "tools/list", json!({})).await;
-    assert_eq!(tools["tools"].as_array().unwrap().len(), 6);
+    assert_eq!(tools["tools"].as_array().unwrap().len(), 8);
     let result = raw_request(&mut stdin, &mut stdout, 3, "tools/call", json!({"name": "search_lessons", "arguments": {"repository": REPOSITORY, "query": "pagination"}})).await;
     assert_eq!(
         result["structuredContent"]["lessons"]

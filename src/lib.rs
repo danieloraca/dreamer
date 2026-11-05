@@ -17,4 +17,5 @@ pub mod mac;
 pub mod repository;
 pub mod retrieval;
 
+pub mod chronology;
 pub mod conversation;

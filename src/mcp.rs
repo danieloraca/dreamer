@@ -42,6 +42,8 @@ pub const LIST_REPOSITORIES: &str = "list_repositories";
 #[serde(deny_unknown_fields)]
 struct ListInput {}
 
+pub const ASSESS_CHANGE: &str = "assess_lesson_change";
+pub const ASSESS_CONVERSATION: &str = "assess_conversation_candidate";
 pub const SUBMIT_CONVERSATION: &str = "submit_conversation_candidate";
 
 pub const SUBMIT_CANDIDATE: &str = "submit_candidate";
@@ -70,6 +72,8 @@ struct GetInput {
 struct SubmitInput {
     /// Candidate with asserted producer and source evidence. Never automatically verified.
     lesson: Lesson,
+    #[serde(default)]
+    assessment_token: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -88,6 +92,8 @@ enum Operation {
     Search(SearchInput),
     Get(GetInput),
     Submit(SubmitInput),
+    Assess(SubmitInput),
+    AssessChange(ChangeInput),
 }
 
 #[derive(Clone)]
@@ -128,6 +134,16 @@ fn tool_error(code: &str, message: impl ToString) -> CallToolResult {
 impl DreamerMcp {
     fn new(config: &Config, allow_writes: bool) -> Self {
         let mut tools = vec![
+            definition::<ChangeInput>(
+                ASSESS_CHANGE,
+                "Check a scoped lesson change without applying it. Terminal chat corrections need explicit correction/result evidence newer than affected source and conflict history. Unknown/older evidence can record conflicts. Mutation rechecks atomically; this is not an approval or verification.",
+                true,
+            ),
+            definition::<SubmitInput>(
+                ASSESS_CONVERSATION,
+                "Assess a scoped conversation candidate against active same-key lessons before storing it. Returns source chronology, related full records and a token bound to current knowledge. Dates do not prove correctness; reconcile contradictions. Requires schema 7.",
+                true,
+            ),
             definition::<ListInput>(
                 LIST_REPOSITORIES,
                 "List configured repository scopes and the default. Choose a scope before searching or storing lessons; data is never combined across repositories.",
@@ -178,6 +194,8 @@ impl DreamerMcp {
                 serde_json::from_value::<ListInput>(arguments).map(|_| Operation::List)
             }
             SEARCH_LESSONS => serde_json::from_value(arguments).map(Operation::Search),
+            ASSESS_CHANGE => serde_json::from_value(arguments).map(Operation::AssessChange),
+            ASSESS_CONVERSATION => serde_json::from_value(arguments).map(Operation::Assess),
             GET_LESSON => serde_json::from_value(arguments).map(Operation::Get),
             GET_RUNS => serde_json::from_value(arguments).map(Operation::Runs),
             RECORD_RUN => serde_json::from_value(arguments).map(Operation::Report),
@@ -194,12 +212,16 @@ impl DreamerMcp {
             Operation::List => None,
             Operation::Search(input) => Some(&mut input.repository),
             Operation::Get(input) => Some(&mut input.repository),
-            Operation::Submit(input) => Some(&mut input.lesson.repository),
+            Operation::Submit(input) | Operation::Assess(input) => {
+                Some(&mut input.lesson.repository)
+            }
             Operation::History(input) => Some(&mut input.repository),
             Operation::Recall(input) => Some(&mut input.repository),
             Operation::Runs(input) => Some(&mut input.repository),
             Operation::Report(input) => Some(&mut input.repository),
-            Operation::Change(input) => Some(&mut input.change.repository),
+            Operation::Change(input) | Operation::AssessChange(input) => {
+                Some(&mut input.change.repository)
+            }
         };
         if let Some(repository) = repository {
             *repository =
@@ -270,6 +292,14 @@ impl DreamerMcp {
                         json!({"outcome":match outcome {WriteOutcome::Inserted=>"applied",WriteOutcome::Unchanged=>"unchanged"},"record":change}),
                     )
                 }
+                Operation::AssessChange(input) => {
+                    SqliteStore::open_read_only(&self.database)?.assess_change(&input.change)
+                }
+                Operation::Assess(input) => Ok(serde_json::to_value(
+                    SqliteStore::open_read_only(&self.database)?
+                        .assess_conversation(&input.lesson)?,
+                )
+                .expect("assessment serialization")),
                 Operation::Submit(input) => {
                     // Defense in depth; tool discovery is not access control.
                     if !self.allow_writes {
@@ -280,7 +310,9 @@ impl DreamerMcp {
                         .validate_candidate()
                         .map_err(StoreError::Invalid)?;
                     let mut store = SqliteStore::open_existing(&self.database)?;
-                    let outcome = match store.put_candidate(&input.lesson)? {
+                    let outcome = match store
+                        .put_assessed_candidate(&input.lesson, input.assessment_token.as_deref())?
+                    {
                         WriteOutcome::Inserted => "inserted",
                         WriteOutcome::Unchanged => "unchanged",
                     };

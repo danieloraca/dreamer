@@ -35,6 +35,11 @@ impl MacMcp {
             settings: Arc::new(settings),
             gate: Arc::new(tokio::sync::Mutex::new(())),
             tools: vec![
+                crate::mcp::definition::<conversations::RememberChatInput>(
+                    "assess_chat_lessons",
+                    "Compare inspected drafts with active same-key knowledge before publication. Returns source-time relations, full related lessons and assessment tokens. Assess every related lesson as consistent, historical, conflict or correction; dates alone do not settle truth.",
+                    true,
+                ),
                 crate::mcp::definition::<conversations::ReconcileChatInput>(
                     "reconcile_chat_lessons",
                     "Supersede, retire or flag conflicts using inspected conversation sources. Publish an active replacement first; preserve history. Omit changes to resume an identical pending batch. Completion of a page cannot hide pending corrections.",
@@ -135,6 +140,7 @@ impl ServerHandler for MacMcp {
         let activity_settings = settings.clone();
         let result: Result<Value> = super::activity::track(&activity_settings,request.name.as_ref(),&activity_input,async {
             match request.name.as_ref() {
+                "assess_chat_lessons" => conversations::assess_lessons(&settings,parse(value)?).await,
                 "reconcile_chat_lessons" => conversations::reconcile(&settings,parse(value)?).await,
                 "prepare_chat_learning" => {let input=parse::<conversations::PrepareChatInput>(value)?;tokio::task::spawn_blocking(move ||conversations::prepare(&settings,input)).await?}
                 "read_chat_evidence" => {let input=parse::<conversations::ChatReadInput>(value)?;tokio::task::spawn_blocking(move ||conversations::read(&settings,input)).await?}

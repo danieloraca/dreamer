@@ -16,7 +16,7 @@ make install-service
 make status
 ```
 
-Use 64-bit systemd Linux with current stable Rust, C build tools, make, Python 3.9+
+Use 64-bit systemd Linux with current stable Rust, C build tools, make, Python 3.10+
 and sudo. The installer requests sudo for system configuration. It:
 
 - Builds normally, then installs `/usr/local/bin/dreamer`.
@@ -97,7 +97,7 @@ configuration's database, supply the token environment, then run:
 ## Verification limits
 
 Tests exercise real HTTP MCP clients, bearer roles, Origin/Host checks, payload
-limits, persistence and SIGTERM shutdown on macOS. Three simulated installer tests
+limits, persistence and SIGTERM shutdown on macOS. Simulated installer tests
 check config/token preservation, backups and preflight refusals without sudo or
 system changes. Installer syntax and make recipes are also checked locally;
 installing/verifying systemd and native Pi runtime
@@ -119,8 +119,7 @@ preserves configuration, both tokens and original lesson/evidence records. Older
 binaries cannot read schema 3; a rollback requires the matching pre-upgrade binary
 and consistent backup, not just `dreamer.previous`. Keep the newer DB separately
 and stop the service before restoring. The Mac can still recall from an older Pi,
-but reconciliation reports that deployment is required. Scheduled backup/restore
-automation is a later milestone in the [master plan](master-plan.md).
+but reconciliation reports that deployment is required. Daily checked backups and new-file recovery are documented in [operations](operations.md).
 
 
 ## Retrieval upgrade
@@ -130,3 +129,12 @@ The current update also applies schema 4 for optional lesson component/path scop
 lifecycle history are preserved. Older Mac clients can still use the literal
 search API; updated Mac clients fall back on an older Pi for recall, but scoped
 candidate publication requires the new Pi API. See [retrieval](retrieval.md).
+
+
+## Operations upgrade
+
+Schema 5 adds bounded learning reports without changing lesson/evidence content.
+`make deploy` installs the daily backup timer and its preserved JSON configuration.
+Then run `make backup` once and inspect `make backup-status` and the dashboard.
+See [activity, retention and tested recovery](operations.md) before restoring.
+Deployment is pending until you run these commands on the Pi.

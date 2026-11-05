@@ -274,3 +274,125 @@ async fn api_validates_filters_and_does_not_create_or_migrate_storage() {
     assert!(!database.exists());
     stop(shutdown, task).await;
 }
+
+#[tokio::test]
+async fn operational_apis_share_read_auth_origin_scope_and_bounded_metadata() {
+    use serde_json::json;
+    let (dir, config) = setup();
+    fs::write(dir.path().join("backup-status.json"),serde_json::to_vec(&json!({"manager":"dreamer-backup-v1","state":"failed","error_code":"RAW_SECRET","private":"RAW_SECRET","last_attempt_at":"2026-11-05T12:00:00Z","last_success":{"completed_at":"2026-01-01T00:00:00Z","schema":5,"bytes":1234,"sha256":"a".repeat(64),"retained_count":3,"secret":"RAW_SECRET"}})).unwrap()).unwrap();
+    let (url, shutdown, task) = start(&config).await;
+    let client = reqwest::Client::new();
+    for path in ["/api/activity", "/api/lesson?id=a"] {
+        for credential in ["", WRITE] {
+            assert_eq!(
+                client
+                    .get(format!("{url}{path}"))
+                    .bearer_auth(credential)
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                401
+            );
+        }
+        assert_eq!(
+            client
+                .get(format!("{url}{path}"))
+                .bearer_auth(READ)
+                .header("Origin", "https://untrusted.invalid")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            403
+        );
+        assert_eq!(
+            client
+                .get(format!("{url}{path}"))
+                .bearer_auth(READ)
+                .header("sec-fetch-site", "cross-site")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            403
+        );
+        assert_eq!(
+            client
+                .post(format!("{url}{path}"))
+                .bearer_auth(READ)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            405
+        );
+    }
+    for path in [
+        "/api/activity?repository=other/repo",
+        "/api/lesson?id=other&repository=example/other",
+    ] {
+        assert_eq!(
+            client
+                .get(format!("{url}{path}"))
+                .bearer_auth(READ)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            403
+        );
+    }
+    for path in [
+        "/api/activity?limit=51",
+        "/api/activity?offset=1000001",
+        "/api/activity?raw=true",
+        "/api/lesson?id=a&limit=0",
+        "/api/lesson?id=",
+    ] {
+        assert_eq!(
+            client
+                .get(format!("{url}{path}"))
+                .bearer_auth(READ)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            400
+        );
+    }
+    let response = client
+        .get(format!("{url}/api/activity"))
+        .bearer_auth(READ)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let value: Value = response.json().await.unwrap();
+    assert_eq!(value["backup"]["state"], "failed");
+    assert_eq!(value["backup"]["error_code"], "backup_failed");
+    assert_eq!(value["backup"]["last_success"]["stale"], true);
+    assert!(!value.to_string().contains("RAW_SECRET"));
+    let value: Value = client
+        .get(format!("{url}/api/lesson?id=c"))
+        .bearer_auth(READ)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(value["stored"]["lesson"]["status"], "deprecated");
+    assert_eq!(value["history"]["changes"], json!([]));
+    let value: Value = client
+        .get(format!("{url}/api/lesson?id=other"))
+        .bearer_auth(READ)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(value["stored"], Value::Null);
+    stop(shutdown, task).await;
+}

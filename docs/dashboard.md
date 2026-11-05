@@ -26,6 +26,11 @@ uses no cookies or local/session storage.
   and applicability, and all/candidate/verified/deprecated filters.
 - A selected lesson's applicability, asserted producer/method, storage date,
   ordered evidence descriptions, HTTPS source links and full commit revisions.
+- Learning reports: last received successful learning, failures, incomplete outcomes
+  and paginated recent operations. Reports describe the selected repository.
+- Last checked backup/failure/staleness for the whole library; see [recovery](operations.md).
+- Optional lesson scope, replacement/conflict links and paginated correction history.
+  Related lessons can be fetched even outside the current search results.
 - Empty, rejected-token and service-unavailable states. Refresh loads current
   knowledge on demand; there is no periodic polling or background work.
 
@@ -42,6 +47,12 @@ scope when omitted. Responses include the configured names for the selector. It 
 rejects cross-site browser requests and mismatched Origin, and emits no CORS
 headers. It supports `repository`, `q` (up to 500 characters), `status`, `limit` (1–50, default
 25) and `offset` (up to 1,000,000). Unknown parameters are rejected.
+
+`GET /api/activity` accepts `repository`, `limit` (1–50, default 10) and `offset`.
+`GET /api/lesson` accepts `repository`, `id`, `limit` (1–50, default 20) and history
+`offset`; a missing ID returns `stored:null` with an empty history. Both share the
+knowledge endpoint's read-token/Host/Origin guards and pagination bounds. Backup
+responses contain only selected metadata fields, never raw backup errors.
 
 The HTML/CSS/JS shell is public but contains no credentials or lesson data. A
 restrictive Content Security Policy, no-store responses and text-only rendering

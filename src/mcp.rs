@@ -4,6 +4,7 @@
 pub mod http;
 
 use crate::{
+    activity::{LearningRun, RunQuery},
     config::Config,
     lesson::Lesson,
     lifecycle::{HistoryQuery, LessonChange},
@@ -29,6 +30,8 @@ use std::{error::Error, path::PathBuf, sync::Arc};
 use tokio::sync::Semaphore;
 
 pub const RECALL_LESSONS: &str = "recall_lessons";
+pub const RECORD_RUN: &str = "record_learning_run";
+pub const GET_RUNS: &str = "get_learning_runs";
 pub const SEARCH_LESSONS: &str = "search_lessons";
 pub const GET_LESSON: &str = "get_lesson";
 pub const GET_LESSON_HISTORY: &str = "get_lesson_history";
@@ -77,6 +80,8 @@ enum Operation {
     List,
     History(HistoryQuery),
     Recall(RecallQuery),
+    Runs(RunQuery),
+    Report(LearningRun),
     Change(ChangeInput),
     Search(SearchInput),
     Get(GetInput),
@@ -141,7 +146,9 @@ impl DreamerMcp {
             "Rank scoped active lessons using 1–6 task terms and optional component/file context. Excludes explicit task phrases and common exclusion-only applicability matches. Scores are lexical/context hints, not confidence; inspect full applicability/evidence. Bounded candidate pool reports truncation.",true));
         tools.push(definition::<HistoryQuery>(GET_LESSON_HISTORY,
             "Read a repository-scoped lesson's evidence-backed lifecycle history, including incoming replacements and past conflicts. Bounded pagination; optional change_id retrieves an exact retry receipt.",true));
+        tools.push(definition::<RunQuery>(GET_RUNS,"Read bounded repository-scoped operational reports. Counts/times describe reports received, not a complete audit; incomplete reports do not establish a still-running job.",true));
         if allow_writes {
+            tools.push(definition::<LearningRun>(RECORD_RUN,"Report redacted capture/publication/reconciliation status with identifiers, times and counts. Never include prompts, source bodies, credentials or raw exceptions. Exact retries are no-ops; terminal reports cannot be rewritten.",false));
             tools.push(definition::<ChangeInput>(CHANGE_LESSON,
                 "Append an evidence-backed supersede, retire or conflict event. Supersede/retire deprecates the source; conflict leaves both active. Targets must already exist and be active in the same repository. Preserves content/history; exact retries are no-ops. Cannot verify or delete lessons.",false));
             tools.push(definition::<SubmitInput>(SUBMIT_CANDIDATE,
@@ -169,6 +176,8 @@ impl DreamerMcp {
             }
             SEARCH_LESSONS => serde_json::from_value(arguments).map(Operation::Search),
             GET_LESSON => serde_json::from_value(arguments).map(Operation::Get),
+            GET_RUNS => serde_json::from_value(arguments).map(Operation::Runs),
+            RECORD_RUN => serde_json::from_value(arguments).map(Operation::Report),
             RECALL_LESSONS => serde_json::from_value(arguments).map(Operation::Recall),
             GET_LESSON_HISTORY => serde_json::from_value(arguments).map(Operation::History),
             CHANGE_LESSON => serde_json::from_value(arguments).map(Operation::Change),
@@ -183,6 +192,8 @@ impl DreamerMcp {
             Operation::Submit(input) => Some(&mut input.lesson.repository),
             Operation::History(input) => Some(&mut input.repository),
             Operation::Recall(input) => Some(&mut input.repository),
+            Operation::Runs(input) => Some(&mut input.repository),
+            Operation::Report(input) => Some(&mut input.repository),
             Operation::Change(input) => Some(&mut input.change.repository),
         };
         if let Some(repository) = repository {
@@ -220,6 +231,19 @@ impl DreamerMcp {
                     })?;
                     Ok(
                         json!({ "repository": input.repository, "found": lesson.is_some(), "lesson": lesson, "history":history }),
+                    )
+                }
+                Operation::Runs(query) => Ok(serde_json::to_value(
+                    SqliteStore::open_read_only(&self.database)?.runs(&query)?,
+                )
+                .expect("activity serialization")),
+                Operation::Report(run) => {
+                    if !self.allow_writes {
+                        return Err(StoreError::Invalid("activity reporting is disabled"));
+                    }
+                    let outcome = SqliteStore::open_existing(&self.database)?.record_run(&run)?;
+                    Ok(
+                        json!({"repository":run.repository,"id":run.id,"outcome":match outcome {WriteOutcome::Inserted=>"recorded",WriteOutcome::Unchanged=>"unchanged"}}),
                     )
                 }
                 Operation::Recall(query) => {

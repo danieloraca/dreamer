@@ -171,8 +171,40 @@ async fn sdk_clients_use_read_and_write_tokens_against_the_same_endpoint() {
     let (url, shutdown, task) = start(&config, true).await;
     let reader = connect(&url, READ).await;
     let writer = connect(&url, WRITE).await;
-    assert_eq!(reader.list_all_tools().await.unwrap().len(), 5);
-    assert_eq!(writer.list_all_tools().await.unwrap().len(), 7);
+    assert_eq!(reader.list_all_tools().await.unwrap().len(), 6);
+    assert_eq!(writer.list_all_tools().await.unwrap().len(), 9);
+    let report = json!({"repository":REPO,"id":"a".repeat(64),"phase":"capture","state":"failed","client_started_at":"2026-11-05T12:00:00Z","client_finished_at":"2026-11-05T12:01:00Z","pr":12});
+    assert!(
+        reader
+            .call_tool(
+                CallToolRequestParams::new("record_learning_run")
+                    .with_arguments(report.as_object().unwrap().clone())
+            )
+            .await
+            .is_err()
+    );
+    for outcome in ["recorded", "unchanged"] {
+        let result = call(&writer, "record_learning_run", report.clone()).await;
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        assert_eq!(result.structured_content.unwrap()["outcome"], outcome);
+    }
+    let activity = call(&reader, "get_learning_runs", json!({"repository":REPO})).await;
+    assert_eq!(
+        activity.structured_content.unwrap()["summary"]["failures"],
+        1
+    );
+    let mut invalid = report.clone();
+    invalid["raw_error"] = json!("withheld");
+    assert_eq!(
+        call(&writer, "record_learning_run", invalid).await.is_error,
+        Some(true)
+    );
+    let mut outside = report;
+    outside["repository"] = json!("outside/repo");
+    assert_eq!(
+        call(&writer, "record_learning_run", outside).await.is_error,
+        Some(true)
+    );
     let lesson: Value = serde_json::from_str(FIXTURE).unwrap();
     assert!(
         reader

@@ -154,3 +154,10 @@ cargo test --locked --features mac-client
 python3 -m unittest discover -s tests -p 'test_install*.py'
 cargo clippy --locked --features mac-client --all-targets -- -D warnings
 ```
+
+
+Operational reporting is automatic for Mac learning entry points; see
+[operations](operations.md). It adds no model call, daemon or per-lesson approval.
+Queued/failed reporting must not be described as proof that learning failed or
+that partial writes were rolled back. Conversation learning is a separate planned
+milestone, not an enabled collector.

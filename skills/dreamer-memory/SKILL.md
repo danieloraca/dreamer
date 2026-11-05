@@ -109,3 +109,10 @@ inferences and test-execution limits. Candidate means provisional, already usabl
 knowledge; it does not create a manual approval queue. Briefly report useful
 knowledge applied and new lessons actually stored, without claiming the model's
 weights changed or that lessons guarantee correct code.
+
+
+Learning activity reporting is best effort inside these tools; it needs no extra
+agent call. `activity_reporting: queued|unavailable` does not negate a successful
+lesson write. On a failed batch, report partial/unknown outcomes and use the
+existing resume/readback workflow; do not assume rollback. Chat learning remains
+planned separately; these tools currently accept PR evidence only.

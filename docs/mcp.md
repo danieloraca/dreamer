@@ -108,3 +108,10 @@ a session ID. Credentials are removed before dispatch to protocol handlers.
 There is no OAuth, unattended collection, standalone model refinement, verification
 or content-edit/delete workflow. Lifecycle transitions preserve original records. On-demand agent learning uses the separate Mac tools. Pi installation and actual client registration still require
 deployment-host verification; local tests do not establish a live Pi connection.
+
+
+Schema 5 adds `get_learning_runs` (read) and `record_learning_run` (writer).
+Reports contain bounded operational metadata only, scoped by the same repository
+allowlist; terminal outcomes cannot be rewritten. See [operations](operations.md)
+for retry, freshness and retention limits. The Mac MCP still exposes seven tools;
+reporting runs inside its learning calls and adds no agent round trip.

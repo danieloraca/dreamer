@@ -1215,6 +1215,16 @@ async fn older_pi_fallback_uses_the_same_exclusion_guard_and_rejects_scoped_writ
     });
     let recall = recall_command(&settings, &["--query", "export"]).await;
     assert_eq!(recall["retrieval_mode"], "legacy_fallback");
+    let activity = dreamer::mac::activity::track(
+        &settings,
+        "prepare_pr_learning",
+        &json!({"pr":"https://github.com/example/project/pull/12"}),
+        async { Ok(json!({"revision":"a".repeat(64)})) },
+    )
+    .await
+    .unwrap();
+    assert_eq!(activity["activity_reporting"], "queued");
+
     assert_eq!(recall["lessons"].as_array().unwrap().len(), 1);
     assert_eq!(recall["lessons"][0]["lesson"]["id"], good.id);
     let api = Fake::new();
@@ -1246,4 +1256,120 @@ async fn older_pi_fallback_uses_the_same_exclusion_guard_and_rejects_scoped_writ
     assert!(error.to_string().contains("Pi upgrade required"));
     stop.cancel();
     task.await.unwrap();
+}
+
+#[tokio::test]
+async fn actual_mac_gateway_reports_failed_runs_without_error_bodies_or_knowledge_writes() {
+    use dreamer::activity::RunQuery;
+    use rmcp::{ServiceExt, model::CallToolRequestParams, transport::TokioChildProcess};
+    let dir = tempfile::tempdir().unwrap();
+    let mut settings = settings(dir.path());
+    let (url, stop, task, db) = backend(dir.path()).await;
+    settings.endpoint = url;
+    let (revision, _) = prepared(&settings, &Fake::new());
+    let path = dir.path().join("mac.toml");
+    fs::write(
+        &path,
+        format!(
+            "repository = \"{REPO}\"\nendpoint = {:?}\nwriter_token_file = {:?}\ncache_dir = {:?}",
+            settings.endpoint, settings.writer_token_file, settings.cache_dir
+        ),
+    )
+    .unwrap();
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_dreamer"));
+    command.args(["mac", "--settings"]).arg(&path).arg("mcp");
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+    // Valid cached source context; invalid empty batch fails before any gh call.
+    let result = client
+        .call_tool(
+            CallToolRequestParams::new("remember_pr_lessons").with_arguments(
+                json!({"revision":revision,"lessons":[]})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(true));
+    client.cancel().await.unwrap();
+    let store = SqliteStore::open_read_only(&db).unwrap();
+    let page = store
+        .runs(&RunQuery {
+            repository: REPO.into(),
+            limit: 10,
+            offset: 0,
+        })
+        .unwrap();
+    assert_eq!(page.summary.failures, 1);
+    assert_eq!(page.runs[0].run.inserted, None);
+    assert!(
+        store
+            .search(&SearchQuery {
+                repository: REPO.into(),
+                text: "account".into(),
+                limit: 5
+            })
+            .unwrap()
+            .is_empty()
+    );
+    let text = serde_json::to_string(&page).unwrap();
+    assert!(!text.contains("skip_reason"));
+    assert!(!text.contains(WRITE));
+    assert_eq!(
+        dreamer::mac::activity::local_summary(&settings)["queued"],
+        0
+    );
+    // Same instrumentation covers CLI entry points, without GitHub access.
+    let draft_file = dir.path().join("empty.json");
+    fs::write(&draft_file, "[]").unwrap();
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_dreamer"))
+        .args(["mac", "--settings"])
+        .arg(path)
+        .args(["remember", "--revision", &revision, "--file"])
+        .arg(draft_file)
+        .output()
+        .await
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        store
+            .runs(&RunQuery {
+                repository: REPO.into(),
+                limit: 10,
+                offset: 0
+            })
+            .unwrap()
+            .summary
+            .failures,
+        2
+    );
+    stop.cancel();
+    task.await.unwrap();
+}
+#[tokio::test]
+async fn activity_is_best_effort_redacted_and_queued_when_pi_is_unavailable() {
+    use dreamer::mac::activity;
+    let dir = tempfile::tempdir().unwrap();
+    let settings = settings(dir.path());
+    let input = json!({"pr":"https://github.com/example/project/pull/12"});
+    let result=activity::track(&settings,"prepare_pr_learning",&input,async {Ok(json!({"revision":"a".repeat(64),"evidence":[],"secret":"source stays out of telemetry"}))}).await.unwrap();
+    assert_eq!(result["activity_reporting"], "queued");
+    assert_eq!(result["secret"], "source stays out of telemetry");
+    let error = activity::track(&settings, "prepare_pr_learning", &input, async {
+        Err("private exception body".into())
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(error.to_string(), "private exception body");
+    assert_eq!(activity::local_summary(&settings)["queued"], 2);
+    for entry in fs::read_dir(settings.cache_dir.join("runs")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|s| s == "json") {
+            let text = fs::read_to_string(path).unwrap();
+            assert!(!text.contains("private exception body"));
+            assert!(!text.contains("source stays out"));
+            assert!(!text.contains(WRITE));
+        }
+    }
 }

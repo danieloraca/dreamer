@@ -1071,3 +1071,5 @@ input::placeholder{
   color: #58675e;
   font-size: 12px;
 }
+
+.operations{display:grid;grid-template-columns:2fr 1fr;gap:18px;margin:24px 0}.operation-card{border:1px solid var(--border,#dce4dc);border-radius:12px;padding:20px;background:#fff;min-width:0}.operation-card h2{font-size:17px;margin:0 0 12px}.operation-card p{line-height:1.6}.run-row{padding:10px 0;border-top:1px solid #e7ece7;font-size:13px;line-height:1.6}.run-row.failed{color:#9b3328}.run-row.started{color:#82601b}.history-row{padding:12px 0;border-bottom:1px solid #e7ece7;font-size:13px;overflow-wrap:anywhere}.relation-button{display:block;margin:8px 0;max-width:100%;overflow-wrap:anywhere;text-align:left}.scope-values{font-size:13px;overflow-wrap:anywhere;line-height:1.6}@media(max-width:850px){.operations{grid-template-columns:1fr}}

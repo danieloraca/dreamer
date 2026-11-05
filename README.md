@@ -65,6 +65,7 @@ cargo clippy --locked --all-targets -- -D warnings
 
 ## Documentation
 
+- [Activity, backups and recovery](docs/operations.md)
 - [CI checks and local equivalents](docs/ci.md)
 - [Context-aware retrieval](docs/retrieval.md)
 

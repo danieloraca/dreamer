@@ -88,8 +88,8 @@ jobs:
       - name: Rust tests
         run: cargo test --locked --features "$CARGO_FEATURES"
 
-      - name: Installer tests
-        run: python3 -m unittest discover -s tests -p 'test_install*.py'
+      - name: Backup and installer tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
 
       - name: Native release build
         run: cargo build --locked --release --features "$CARGO_FEATURES"

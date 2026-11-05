@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 import sqlite3
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -36,11 +37,18 @@ class InstallerTests(unittest.TestCase):
         (self.source / "target/release/dreamer").chmod(0o755)
         (self.source / "deploy/dreamer.toml").write_text("fixture config")
         (self.source / "deploy/dreamer.service").write_text("# Managed by Dreamer.\n[Service]\nType=exec\n")
+        (self.source / "scripts").mkdir()
+        real_root = Path(__file__).resolve().parents[1]
+        for asset in ("scripts/backup.py", "deploy/dreamer-backup.service", "deploy/dreamer-backup.timer"):
+            shutil.copyfile(real_root / asset, self.source / asset)
+        (self.source / "deploy/backup.json").write_text(json.dumps({"directory": str(self.state / "backups"), "keep":14,"timeout_seconds":120}))
         self.metadata = {"data_dir": str(self.state), "http": {"listen": "127.0.0.1:3445"}}
         self.calls = []
         self.active = False
         replacements = {"ROOT": self.source, "BINARY": self.binary, "CONFIG": self.config,
-                        "ENV": self.config.with_name("dreamer.env"), "UNIT": self.unit, "STATE": self.state}
+                        "ENV": self.config.with_name("dreamer.env"), "UNIT": self.unit, "STATE": self.state,
+                        "BACKUP_UNIT": self.unit.with_name("dreamer-backup.service"), "BACKUP_TIMER": self.unit.with_name("dreamer-backup.timer"),
+                        "BACKUP_CONFIG": self.config.with_name("backup.json"), "BACKUP_SCRIPT":self.root / "lib/dreamer/backup.py"}
         for name, value in replacements.items():
             self.enter(patch.object(installer, name, value))
         self.enter(patch.object(installer.sys, "platform", "linux"))
@@ -73,7 +81,7 @@ class InstallerTests(unittest.TestCase):
         if command[0] == "runuser":
             if "-c" in command:
                 return REAL_RUN([sys.executable, *command[5:]], check=True, capture_output=True, text=True)
-            with sqlite3.connect(self.state / "knowledge.sqlite3") as database:
+            with contextlib.closing(sqlite3.connect(self.state / "knowledge.sqlite3")) as database, database:
                 database.execute("CREATE TABLE IF NOT EXISTS observations (value TEXT)")
         return subprocess.CompletedProcess(command, 0)
 
@@ -92,7 +100,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(installer.ENV.stat().st_mode & 0o777, 0o600)
         self.assertEqual(self.config.parent.stat().st_mode & 0o777, 0o750)
         self.config.write_text("operator's existing config\nrepositories = [\"example/first\", \"example/second\"]")
-        with sqlite3.connect(self.state / "knowledge.sqlite3") as database:
+        with contextlib.closing(sqlite3.connect(self.state / "knowledge.sqlite3")) as database, database:
             database.execute("INSERT INTO observations VALUES ('keep this knowledge')")
         (self.source / "target/release/dreamer").write_text("second-binary")
         with contextlib.redirect_stdout(output):
@@ -103,7 +111,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(self.binary.with_name("dreamer.previous").read_text(), "first-binary")
         backups = list((self.root / "backups").glob("*.sqlite3"))
         self.assertEqual(len(backups), 1)
-        with sqlite3.connect(backups[0]) as database:
+        with contextlib.closing(sqlite3.connect(backups[0])) as database, database:
             self.assertEqual(database.execute("SELECT value FROM observations").fetchone()[0], "keep this knowledge")
         self.assertIn(["systemctl", "stop", "dreamer.service"], self.calls)
         self.assertIn(["systemctl", "enable", "--now", "dreamer.service"], self.calls)
@@ -124,6 +132,27 @@ class InstallerTests(unittest.TestCase):
             installer.install_service()
         self.assertFalse(self.config.exists())
         self.assertFalse(self.state.exists())
+
+    def test_backup_assets_timer_and_configuration_preserved(self):
+        installer.install_service()
+        self.assertEqual(installer.BACKUP_SCRIPT.stat().st_mode & 0o777, 0o755)
+        self.assertEqual((self.state / "backups").stat().st_mode & 0o777, 0o700)
+        self.assertIn(["systemctl","enable","--now","dreamer-backup.timer"], self.calls)
+        settings = json.loads(installer.BACKUP_CONFIG.read_text())
+        settings["keep"] = 7
+        installer.BACKUP_CONFIG.write_text(json.dumps(settings))
+        installer.install_service()
+        self.assertEqual(json.loads(installer.BACKUP_CONFIG.read_text())["keep"],7)
+
+    def test_unmanaged_backup_unit_or_bad_config_rejected_before_stop(self):
+        installer.BACKUP_TIMER.write_text("# operator unit")
+        with self.assertRaises(RuntimeError): installer.install_service()
+        self.assertFalse(any("stop" in call for call in self.calls))
+        installer.BACKUP_TIMER.unlink()
+        self.config.parent.mkdir(parents=True)
+        installer.BACKUP_CONFIG.write_text('{"directory":"/tmp/elsewhere"}')
+        with self.assertRaises(RuntimeError): installer.install_service()
+        self.assertFalse(any("stop" in call for call in self.calls))
 
 
 if __name__ == "__main__":

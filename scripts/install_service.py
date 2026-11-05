@@ -21,6 +21,10 @@ ENV = Path("/etc/dreamer/dreamer.env")
 UNIT = Path("/etc/systemd/system/dreamer.service")
 STATE = Path("/var/lib/dreamer")
 SERVICE = "dreamer.service"
+BACKUP_UNIT = UNIT.with_name("dreamer-backup.service")
+BACKUP_TIMER = UNIT.with_name("dreamer-backup.timer")
+BACKUP_CONFIG = CONFIG.with_name("backup.json")
+BACKUP_SCRIPT = Path("/usr/local/lib/dreamer/backup.py")
 
 
 def run(*args, **kwargs):
@@ -68,8 +72,23 @@ def install_service():
             raise RuntimeError(f"Required command missing: {command}")
     if not Path("/usr/bin/python3").is_file():
         raise RuntimeError("The system Python /usr/bin/python3 is required for database backups")
-    if UNIT.exists() and not UNIT.read_text().startswith("# Managed by Dreamer."):
-        raise RuntimeError(f"{UNIT} is not managed by this installer; integrate it manually")
+    for unit in (UNIT, BACKUP_UNIT, BACKUP_TIMER):
+        if unit.is_symlink() or (unit.exists() and not unit.read_text().startswith("# Managed by Dreamer.")):
+            raise RuntimeError(f"{unit} is not managed by this installer; integrate it manually")
+    for asset in ("scripts/backup.py", "deploy/backup.json", "deploy/dreamer-backup.service", "deploy/dreamer-backup.timer"):
+        if not (ROOT / asset).is_file():
+            raise RuntimeError("Missing backup deployment asset: " + asset)
+    candidate_backup = BACKUP_CONFIG if BACKUP_CONFIG.exists() else ROOT / "deploy/backup.json"
+    backup_settings = json.loads(candidate_backup.read_text())
+    if (not isinstance(backup_settings, dict) or set(backup_settings) - {"directory", "keep", "timeout_seconds"}
+        or not isinstance(backup_settings.get("directory"), str) or not Path(backup_settings["directory"]).is_absolute()
+        or type(backup_settings.get("keep", 14)) is not int or not 1 <= backup_settings.get("keep", 14) <= 3650
+        or type(backup_settings.get("timeout_seconds", 120)) is not int or not 1 <= backup_settings.get("timeout_seconds", 120) <= 120):
+        raise RuntimeError("Invalid backup configuration; values withheld")
+    # The shipped sandbox permits writes only under STATE. Custom destinations
+    # require an operator-managed systemd drop-in and are not silently created.
+    if not Path(backup_settings["directory"]).resolve().is_relative_to(STATE.resolve()) or Path(backup_settings["directory"]).resolve() == STATE.resolve():
+        raise RuntimeError("Backup directory must be under /var/lib/dreamer for this installer")
     candidate_config = CONFIG if CONFIG.exists() else ROOT / "deploy/dreamer.toml"
     metadata = json.loads(run(source, "--config", candidate_config, "status", "--json", capture_output=True, text=True).stdout)
     if Path(metadata["data_dir"]).resolve() != STATE:
@@ -97,6 +116,16 @@ def install_service():
     STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chown(STATE, account.pw_uid, account.pw_gid)
     STATE.chmod(0o700)
+    backup_directory = Path(backup_settings["directory"])
+    if backup_directory.is_symlink():
+        raise RuntimeError("Backup directory must not be a symlink")
+    backup_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chown(backup_directory, account.pw_uid, account.pw_gid)
+    backup_directory.chmod(0o700)
+    if not BACKUP_CONFIG.exists():
+        atomic_copy(candidate_backup, BACKUP_CONFIG, 0o640)
+    os.chown(BACKUP_CONFIG, 0, account.pw_gid)
+    BACKUP_CONFIG.chmod(0o640)
     if not CONFIG.exists():
         atomic_copy(candidate_config, CONFIG, 0o640)
     os.chown(CONFIG, 0, account.pw_gid)
@@ -111,6 +140,9 @@ def install_service():
     credentials = read_credentials()
     if run("systemctl", "is-active", "--quiet", SERVICE, check=False).returncode == 0:
         run("systemctl", "stop", SERVICE)
+    # Avoid a scheduled copy racing the pre-migration backup and schema upgrade.
+    run("systemctl", "stop", "dreamer-backup.timer", check=False)
+    run("systemctl", "stop", "dreamer-backup.service", check=False)
     database = STATE / "knowledge.sqlite3"
     if database.exists():
         backups = Path("/var/backups/dreamer")
@@ -141,7 +173,12 @@ with contextlib.closing(sqlite3.connect(pathlib.Path(sys.argv[1]).as_uri() + '?m
     atomic_copy(source, BINARY, 0o755)
     run("runuser", "-u", "dreamer", "--", BINARY, "--config", CONFIG, "db", "init")
     atomic_copy(ROOT / "deploy/dreamer.service", UNIT, 0o644)
-    run("systemd-analyze", "verify", UNIT)
+    BACKUP_SCRIPT.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    BACKUP_SCRIPT.parent.chmod(0o755)
+    atomic_copy(ROOT / "scripts/backup.py", BACKUP_SCRIPT, 0o755)
+    atomic_copy(ROOT / "deploy/dreamer-backup.service", BACKUP_UNIT, 0o644)
+    atomic_copy(ROOT / "deploy/dreamer-backup.timer", BACKUP_TIMER, 0o644)
+    run("systemd-analyze", "verify", UNIT, BACKUP_UNIT, BACKUP_TIMER)
     run("systemctl", "daemon-reload")
     run("systemctl", "enable", "--now", SERVICE)
     listen = metadata["http"]["listen"]
@@ -156,7 +193,9 @@ with contextlib.closing(sqlite3.connect(pathlib.Path(sys.argv[1]).as_uri() + '?m
             with opener.open(request, timeout=1) as response:
                 active = run("systemctl", "is-active", "--quiet", SERVICE, check=False).returncode == 0
                 if active and response.status == 200 and json.load(response).get("status") == "ok":
+                    run("systemctl", "enable", "--now", "dreamer-backup.timer")
                     print("Dreamer installed, enabled at boot, and healthy on port " + port)
+                    print("Daily backup timer enabled; run make backup for an immediate checked snapshot")
                     print(f"Credentials retained privately in {ENV}; values not displayed")
                     return
         except (OSError, ValueError):

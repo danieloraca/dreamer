@@ -89,6 +89,13 @@ enum Command {
 
 #[derive(Subcommand)]
 enum DbCommand {
+    /// Read-only schema/integrity check; --file needs no service config.
+    Check {
+        #[arg(long)]
+        file: Option<PathBuf>,
+        #[arg(long)]
+        allow_older: bool,
+    },
     /// Initialize SQLite and apply pending versioned migrations.
     Init,
 }
@@ -177,6 +184,17 @@ async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
         eprintln!("{name}: not implemented; no work performed");
         return Ok(ExitCode::from(2));
     }
+    if let Command::Db {
+        command: DbCommand::Check {
+            file: Some(file),
+            allow_older,
+        },
+    } = &cli.command
+    {
+        let schema = SqliteStore::check_file(file, *allow_older)?;
+        println!("{}", serde_json::json!({"schema":schema,"integrity":"ok"}));
+        return Ok(ExitCode::SUCCESS);
+    }
     let config = Config::load(&cli.config)?;
     let database = config.data_dir.join("knowledge.sqlite3");
     match cli.command {
@@ -210,6 +228,13 @@ async fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
                 "Consolidation: evidence-backed lifecycle tools; unattended scanning is not implemented"
             );
             println!("MCP: stdio (read-only by default); authenticated HTTP with serve");
+        }
+        Command::Db {
+            command: DbCommand::Check { file, allow_older },
+        } => {
+            let schema =
+                SqliteStore::check_file(file.as_deref().unwrap_or(&database), allow_older)?;
+            println!("{}", serde_json::json!({"schema":schema,"integrity":"ok"}));
         }
         Command::Db {
             command: DbCommand::Init,

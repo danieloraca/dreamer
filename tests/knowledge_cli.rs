@@ -42,7 +42,7 @@ fn local_fixture_can_be_added_searched_and_retrieved_across_cli_processes() {
     let (directory, config) = setup();
     success(run(&config, &["status"]));
     assert!(!directory.path().join("data").exists());
-    assert!(success(run(&config, &["db", "init"])).contains("schema 4"));
+    assert!(success(run(&config, &["db", "init"])).contains("schema 5"));
     assert!(
         success(run(&config, &["lesson", "add", "--file", FIXTURE])).contains("Inserted candidate")
     );

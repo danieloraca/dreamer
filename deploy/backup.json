@@ -1,0 +1,5 @@
+{
+  "directory": "/var/lib/dreamer/backups",
+  "keep": 14,
+  "timeout_seconds": 120
+}

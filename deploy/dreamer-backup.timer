@@ -1,0 +1,12 @@
+# Managed by Dreamer. Use systemctl edit dreamer-backup.timer for local overrides.
+[Unit]
+Description=Daily Dreamer SQLite snapshot
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=15m
+Unit=dreamer-backup.service
+
+[Install]
+WantedBy=timers.target

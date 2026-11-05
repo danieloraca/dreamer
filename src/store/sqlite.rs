@@ -1,4 +1,5 @@
 use super::{LessonStore, SearchQuery, WriteOutcome};
+use crate::activity::{LearningRun, RunPage, RunPhase, RunQuery, RunState, RunSummary, StoredRun};
 use crate::lesson::{
     Evidence, ExtractionMethod, Lesson, LessonStatus, Provenance, PullRequestRef, StoredLesson,
     validate_repository,
@@ -36,6 +37,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 4,
         name: "lesson_scope",
         sql: include_str!("../../migrations/0004_lesson_scope.sql"),
+    },
+    Migration {
+        version: 5,
+        name: "learning_runs",
+        sql: include_str!("../../migrations/0005_learning_runs.sql"),
     },
 ];
 
@@ -116,6 +122,37 @@ impl SqliteStore {
         Ok(Self { connection })
     }
 
+    /// Inspect an existing file without migration or creation, including older
+    /// known schemas when checking a pre-upgrade backup for matching-binary restore.
+    pub fn check_file(path: &Path, allow_older: bool) -> Result<i64, StoreError> {
+        let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        connection.busy_timeout(Duration::from_secs(5))?;
+        check_schema(&connection, MIGRATIONS, !allow_older)?;
+        let check: String = connection.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+        if check != "ok" {
+            return Err(StoreError::Invalid("database integrity check failed"));
+        }
+        let violation: Option<i64> = connection
+            .query_row(
+                "SELECT 1 FROM pragma_foreign_key_check LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if violation.is_some() {
+            return Err(StoreError::Invalid("database foreign-key check failed"));
+        }
+        for table in ["lessons", "pull_requests", "lesson_evidence"] {
+            connection.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get::<_, i64>(0)
+            })?;
+        }
+        Ok(
+            connection.query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })?,
+        )
+    }
     pub fn schema_version(&self) -> Result<i64, StoreError> {
         Ok(self
             .connection
@@ -250,6 +287,111 @@ fn read_lesson(
         stored_at,
         lifecycle: read_lifecycle(connection, repository, id)?,
     }))
+}
+
+impl SqliteStore {
+    pub fn record_run(&mut self, run: &LearningRun) -> Result<WriteOutcome, StoreError> {
+        run.validate().map_err(StoreError::Invalid)?;
+        let payload = serde_json::to_string(run).expect("run serialization");
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let old: Option<String> = tx
+            .query_row(
+                "SELECT payload FROM learning_runs WHERE repository=?1 AND id=?2",
+                params![run.repository, run.id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let outcome = if let Some(old) = old {
+            let prior: LearningRun = serde_json::from_str(&old)
+                .map_err(|_| StoreError::Schema("invalid run payload".into()))?;
+            if prior == *run
+                || (run.state == RunState::Started
+                    && prior.phase == run.phase
+                    && prior.client_started_at == run.client_started_at
+                    && prior.pr == run.pr
+                    && (run.revision.is_none() || prior.revision == run.revision))
+            {
+                // A delayed started report must never undo a terminal outcome.
+                return Ok(WriteOutcome::Unchanged);
+            }
+            if prior.state != RunState::Started
+                || run.state == RunState::Started
+                || prior.phase != run.phase
+                || prior.client_started_at != run.client_started_at
+                || prior.pr != run.pr
+            {
+                return Err(StoreError::Conflict(
+                    "completed run reports cannot be rewritten".into(),
+                ));
+            }
+            tx.execute("UPDATE learning_runs SET state=?3,payload=?4,reported_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE repository=?1 AND id=?2",params![run.repository,run.id,run.state.as_str(),payload])?;
+            WriteOutcome::Inserted
+        } else {
+            let phase = match run.phase {
+                RunPhase::Capture => "capture",
+                RunPhase::Publication => "publication",
+                RunPhase::Reconciliation => "reconciliation",
+            };
+            tx.execute("INSERT INTO learning_runs(repository,id,phase,state,payload) VALUES (?1,?2,?3,?4,?5)",params![run.repository,run.id,phase,run.state.as_str(),payload])?;
+            WriteOutcome::Inserted
+        };
+        tx.execute("DELETE FROM learning_runs WHERE repository=?1 AND id NOT IN (SELECT id FROM learning_runs WHERE repository=?1 ORDER BY reported_at DESC,rowid DESC LIMIT 500)",[&run.repository])?;
+        tx.commit()?;
+        Ok(outcome)
+    }
+    pub fn runs(&self, query: &RunQuery) -> Result<RunPage, StoreError> {
+        validate_repository(&query.repository).map_err(StoreError::Invalid)?;
+        if !(1..=50).contains(&query.limit) || query.offset > 1_000_000 {
+            return Err(StoreError::Invalid("invalid activity pagination"));
+        }
+        let tx = self.connection.unchecked_transaction()?;
+        let summary=tx.query_row("SELECT COUNT(*),COALESCE(SUM(state='started'),0),COALESCE(SUM(state='failed'),0),MAX(CASE WHEN state='succeeded' AND phase IN ('publication','reconciliation') THEN reported_at END),MAX(CASE WHEN state='failed' THEN reported_at END) FROM learning_runs WHERE repository=?1",[&query.repository],|row|Ok(RunSummary {retained:row.get(0)?,incomplete:row.get(1)?,failures:row.get(2)?,last_learning_report_at:row.get(3)?,last_failure_report_at:row.get(4)?}))?;
+        let mut statement=tx.prepare("SELECT payload,first_reported_at,reported_at FROM learning_runs WHERE repository=?1 ORDER BY reported_at DESC,rowid DESC LIMIT ?2 OFFSET ?3")?;
+        let rows = statement
+            .query_map(
+                params![
+                    query.repository,
+                    (query.limit + 1) as i64,
+                    query.offset as i64
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        let next_offset = if rows.len() > query.limit {
+            Some(query.offset + query.limit)
+        } else {
+            None
+        };
+        let runs = rows
+            .into_iter()
+            .take(query.limit)
+            .map(|(payload, first_reported_at, reported_at)| {
+                let run = serde_json::from_str(&payload)
+                    .map_err(|_| StoreError::Schema("invalid run payload".into()))?;
+                Ok(StoredRun {
+                    run,
+                    first_reported_at,
+                    reported_at,
+                })
+            })
+            .collect::<Result<Vec<_>, StoreError>>()?;
+        drop(statement);
+        tx.commit()?;
+        Ok(RunPage {
+            repository: query.repository.clone(),
+            summary,
+            runs,
+            next_offset,
+        })
+    }
 }
 
 fn read_scope(
@@ -429,6 +571,17 @@ impl SqliteStore {
                 stored_at: time,
             },
         ))
+    }
+    /// One read snapshot keeps detail/lifecycle and its event page consistent.
+    pub fn lesson_details(
+        &self,
+        query: &HistoryQuery,
+    ) -> Result<(Option<StoredLesson>, HistoryPage), StoreError> {
+        let tx = self.connection.unchecked_transaction()?;
+        let history = self.lesson_history(query)?;
+        let stored = read_lesson(&tx, &query.repository, &query.id)?;
+        tx.commit()?;
+        Ok((stored, history))
     }
     pub fn lesson_history(&self, query: &HistoryQuery) -> Result<HistoryPage, StoreError> {
         validate_repository(&query.repository).map_err(StoreError::Invalid)?;

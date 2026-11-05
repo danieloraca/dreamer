@@ -1,0 +1,21 @@
+# Managed by Dreamer. Use systemctl edit dreamer-backup.service for local overrides.
+[Unit]
+Description=Dreamer checked SQLite snapshot
+After=dreamer.service
+
+[Service]
+Type=oneshot
+User=dreamer
+Group=dreamer
+ExecStart=/usr/bin/python3 /usr/local/lib/dreamer/backup.py create --database /var/lib/dreamer/knowledge.sqlite3 --config /etc/dreamer/backup.json
+UMask=0077
+TimeoutStartSec=180
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/dreamer
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX

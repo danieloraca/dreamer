@@ -111,7 +111,9 @@ impl ServerHandler for MacMcp {
         let _guard = self.gate.lock().await;
         let value = Value::Object(request.arguments.unwrap_or_default());
         let settings = self.settings.clone();
-        let result: Result<Value> = async {
+        let activity_input = value.clone();
+        let activity_settings = settings.clone();
+        let result: Result<Value> = super::activity::track(&activity_settings,request.name.as_ref(),&activity_input,async {
             match request.name.as_ref() {
                 "list_repositories" => {
                     let _: ListInput = parse(value)?;
@@ -144,8 +146,7 @@ impl ServerHandler for MacMcp {
                 }
                 _ => unreachable!(),
             }
-        }
-        .await;
+        }).await;
         Ok(match result {
             Ok(value) => CallToolResult::structured(value),
             Err(error) => CallToolResult::structured_error(

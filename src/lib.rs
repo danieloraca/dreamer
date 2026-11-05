@@ -1,6 +1,7 @@
 //! Dreamer's domain, local SQLite knowledge store and future adapter boundaries.
 //! Includes MCP transports, immutable lesson lifecycle and optional agent-driven Mac learning.
 
+pub mod activity;
 pub mod collector;
 pub mod config;
 pub mod consolidation;

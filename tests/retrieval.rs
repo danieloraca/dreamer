@@ -147,11 +147,11 @@ fn schema_three_upgrade_preserves_history_and_normalized_candidate_data() {
     drop(store);
     Connection::open(&db)
         .unwrap()
-        .execute_batch("DROP TABLE lesson_scope; DELETE FROM schema_migrations WHERE version=4;")
+        .execute_batch("DROP TABLE learning_runs; DELETE FROM schema_migrations WHERE version=5; DROP TABLE lesson_scope; DELETE FROM schema_migrations WHERE version=4;")
         .unwrap();
     assert!(SqliteStore::open_existing(&db).is_err());
     let store = SqliteStore::open(&db).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 4);
+    assert_eq!(store.schema_version().unwrap(), 5);
     let item = store.get(&old.repository, &old.id).unwrap().unwrap();
     assert_eq!(item.lesson.status, LessonStatus::Deprecated);
     assert!(item.lesson.scope.is_empty());

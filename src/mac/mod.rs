@@ -1,4 +1,5 @@
 //! Agent-driven Mac learning. GitHub stays on the Mac; SQLite stays behind Pi MCP.
+pub mod activity;
 pub mod evidence;
 pub mod reconciliation;
 mod remote;
@@ -95,6 +96,11 @@ impl Settings {
 pub enum MacCommand {
     /// Run on-demand Mac MCP tools over stdio; no polling or model API calls.
     Mcp,
+    /// Inspect redacted local learning reports; optionally flush queued reports.
+    Activity {
+        #[arg(long)]
+        sync: bool,
+    },
     /// List the configured Mac repository scopes.
     Repositories,
     /// Capture one PR and return the evidence catalogue.
@@ -162,8 +168,13 @@ pub async fn run(path: PathBuf, command: MacCommand) -> std::result::Result<(), 
             return server::serve(settings).await;
         }
         let value: Value = match command {
+            MacCommand::Activity {sync}=>{
+                let mut value=activity::local_summary(&settings);
+                if sync {value["activity_reporting"]=serde_json::json!(activity::flush(&settings).await);}
+                value
+            }
             MacCommand::Repositories => serde_json::json!({"default_repository":settings.repository,"repositories":settings.repositories()}),
-            MacCommand::Prepare { pr, force } => evidence::prepare_with_force(&settings, &GhApi, &pr, force)?,
+            MacCommand::Prepare { pr, force } => activity::track(&settings,"prepare_pr_learning",&serde_json::json!({"pr":pr,"force":force}),async {evidence::prepare_with_force(&settings,&GhApi,&pr,force)}).await?,
             MacCommand::Read {
                 revision,
                 id,
@@ -182,14 +193,14 @@ pub async fn run(path: PathBuf, command: MacCommand) -> std::result::Result<(), 
             MacCommand::Get { repository, id } => remote::get(&settings, repository.as_deref(), &id).await?,
             MacCommand::Reconcile { revision, file } => {
                 let changes=match file {Some(file)=>serde_json::from_slice(&fs::read(file)?)?,None=>Vec::new()};
-                reconciliation::reconcile(&settings,&GhApi,reconciliation::ReconcileInput {revision,changes}).await?
+                activity::track(&settings,"reconcile_pr_lessons",&serde_json::json!({"revision":revision,"changes":changes}),async {reconciliation::reconcile(&settings,&GhApi,reconciliation::ReconcileInput {revision,changes}).await}).await?
             }
             MacCommand::Remember { revision, file, skip_reason } => {
                 let lessons: Vec<Draft> = match file {
                     Some(file) => serde_json::from_slice(&fs::read(file)?)?,
                     None => Vec::new(),
                 };
-                evidence::remember(&settings, &GhApi, RememberInput { revision, lessons, skip_reason }).await?
+                activity::track(&settings,"remember_pr_lessons",&serde_json::json!({"revision":revision,"lessons":lessons,"skip_reason":skip_reason}),async {evidence::remember(&settings,&GhApi,RememberInput {revision,lessons,skip_reason}).await}).await?
             }
             MacCommand::Mcp => unreachable!(),
         };

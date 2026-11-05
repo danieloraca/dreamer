@@ -149,6 +149,8 @@ pub fn router(
         .route("/dashboard.css", get(dashboard::css))
         .route("/dashboard.js", get(dashboard::javascript))
         .route("/api/knowledge", get(dashboard::knowledge))
+        .route("/api/activity", get(dashboard::activity))
+        .route("/api/lesson", get(dashboard::lesson))
         .route("/mcp", any(endpoint))
         .route("/health", any(endpoint))
         .layer(middleware::from_fn_with_state(state.clone(), allowed_host))

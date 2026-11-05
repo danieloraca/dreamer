@@ -132,9 +132,12 @@ is pushed and its run completes. Earlier rollout-pending notes above describe th
 
 ## Milestone 3: make operation visible and recoverable
 
-Status: implemented and verified locally on 5 November 2026; Pi deployment and
-first scheduled backup remain pending. The macOS CI setup fix is local and
-unpushed; no hosted macOS success is claimed.
+Status: deployed to the Pi on 5 November 2026. Dan's installer output confirms
+schema 5 and healthy service startup. The manual backup service returned success
+(exit 0), and the live Chrome dashboard showed one checked schema-5 backup. The
+daily timer is enabled and waiting; its first scheduled invocation has not yet
+been observed. Recovery remains verified on a disposable local store, not by
+replacing live Pi knowledge. No hosted macOS CI pass is claimed here.
 
 Local evidence: 74 Rust tests with Mac features, 57 default-feature tests and 11
 Python backup/installer tests passed. Formatting, Clippy, JavaScript syntax,
@@ -193,7 +196,7 @@ Implementation decisions and acceptance criteria:
   actual Mac gateway reporting and old-Pi compatibility; API auth and UI states.
   Run relevant Rust/Python suites, lint, formatting, release/ARM checks and local
   synthetic visual verification. Never mutate live knowledge as a test.
-- Rollout is pending until Dan pulls and runs `make deploy` on the Pi. Installation
+- Rollout procedure (now performed by Dan on the Pi): `make deploy`. Installation
   backs up before migration, preserves both tokens/repository settings, installs
   backup assets/config and enables the timer. Update the already-authorized Mac
   client/guidance and start a new Codex task. Older clients remain compatible with
@@ -201,7 +204,25 @@ Implementation decisions and acceptance criteria:
 
 ## Milestone 4: demonstrate useful daily behavior
 
-Status: pending; one initial held-out comparison is already recorded.
+Status: initial paired trial completed on 5 November 2026; ongoing real-task
+usefulness remains to be established. See [the trial report](evaluation.md).
+
+Two fresh isolated same-model contexts reviewed declared unlearned PRs #7870,
+#7868 and #7863 at frozen revisions with identical docs/code. Both reported zero
+supported defects. Dreamer supplied one relevant TLS reminder already covered by
+the baseline's documentation/source check; the other two recalls missed. No
+incremental finding, distinct useful check or review-time saving was established.
+Three compact recalls and one full fetch returned 10,489 raw JSON bytes and took
+0.478 seconds in successful CLI/transport calls; billed model tokens were not
+available. This was a small purposive current-head trial, not a randomized or
+chronological defect-detection benchmark.
+
+After reports/input hashes were frozen and discussions inspected, real Mac
+learning captured the three sources. Two approved heads completed with justified
+no-new-lessons receipts; the unreviewed calendar PR remains context only. Pi
+readback confirmed five successful activity reports and unchanged lesson contents
+(30 records). Do not count duplicate advice or historical already-fixed review
+concerns as a gain. The earlier single-PR pilot remains separate evidence.
 
 Trial a small, declared set of real PR tasks. Freeze baseline/revisions and exclude
 held-out sources from learning. Record useful checks and confirmed findings,

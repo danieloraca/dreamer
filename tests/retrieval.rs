@@ -17,6 +17,121 @@ fn query(terms: &[&str]) -> RecallQuery {
         limit: 5,
     }
 }
+#[test]
+fn phrase_queries_find_distributed_words_without_component_only_filler() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = SqliteStore::open(&dir.path().join("db")).unwrap();
+    let cohort: Value =
+        serde_json::from_str(include_str!("../fixtures/query-matching-cases.json")).unwrap();
+    let mut frozen = Vec::new();
+    for row in cohort["lessons"].as_array().unwrap() {
+        let mut value = serde_json::to_value(fixture()).unwrap();
+        for (key, item) in row.as_object().unwrap() {
+            value[key] = item.clone();
+        }
+        let lesson: Lesson = serde_json::from_value(value).unwrap();
+        store.put_candidate(&lesson).unwrap();
+        frozen.push(store.get(&lesson.repository, &lesson.id).unwrap().unwrap());
+    }
+    for case in cohort["cases"].as_array().unwrap() {
+        let q: RecallQuery = serde_json::from_value(json!({
+            "repository":fixture().repository,"queries":case["queries"],
+            "paths":case.get("paths").cloned().unwrap_or(json!([])),
+            "components":case.get("components").cloned().unwrap_or(json!([])),"limit":20
+        }))
+        .unwrap();
+        let expected: Vec<String> = serde_json::from_value(case["expected"].clone()).unwrap();
+        let page = store.recall(&q).unwrap();
+        let ids: Vec<_> = page
+            .lessons
+            .iter()
+            .map(|hit| hit.stored.lesson.id.clone())
+            .collect();
+        assert_eq!(ids, expected, "{}", case["name"]);
+        // Proves SQL candidate selection hasn't lost a word-group match: compare
+        // with the shared ranker given the complete synthetic library.
+        let all = dreamer::retrieval::rank(&q, frozen.clone(), false).unwrap();
+        assert_eq!(
+            serde_json::to_value(page).unwrap(),
+            serde_json::to_value(all).unwrap(),
+            "{}",
+            case["name"]
+        );
+    }
+}
+
+#[test]
+fn word_matching_keeps_exclusions_boundaries_and_duplicate_queries_safe() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = SqliteStore::open(&dir.path().join("db")).unwrap();
+    let mut lesson = fixture();
+    lesson.summary = "Preserve a bot response during streaming.".into();
+    lesson.applies_when = "When changing HTTPResponse handling; not for data capture.".into();
+    lesson.scope.excluded_terms = vec!["synchronous".into(), "public responses".into()];
+    store.put_candidate(&lesson).unwrap();
+    for terms in [
+        &["synchronous bot response"][..],
+        &["data capture"],
+        &["responseX"],
+        &["public-response bot"],
+        &["PublicResponse bot"],
+    ] {
+        assert!(
+            store.recall(&query(terms)).unwrap().lessons.is_empty(),
+            "{terms:?}"
+        );
+    }
+    let original = store.recall(&query(&["bot response streaming"])).unwrap();
+    let duplicate = store
+        .recall(&query(&[
+            "bot response streaming",
+            "streaming response bot",
+        ]))
+        .unwrap();
+    assert_eq!(
+        original.lessons[0].relevance.score,
+        duplicate.lessons[0].relevance.score
+    );
+    assert_eq!(
+        original.lessons[0].relevance.matched_tokens,
+        ["bot", "response", "stream"]
+    );
+    assert_eq!(
+        store
+            .recall(&query(&["HTTP response"]))
+            .unwrap()
+            .lessons
+            .len(),
+        1
+    );
+    assert_eq!(
+        store
+            .recall(&query(&["asynchronous bot response"]))
+            .unwrap()
+            .lessons
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn broader_word_selection_stays_bounded_and_reports_incomplete_retrieval() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = SqliteStore::open(&dir.path().join("db")).unwrap();
+    let mut lesson = fixture();
+    lesson.summary = "Retry noisy provider callbacks.".into();
+    lesson.applies_when = "Transient callback errors.".into();
+    for n in 0..1001 {
+        lesson.id = format!("bounded-{n:04}");
+        store.put_candidate(&lesson).unwrap();
+    }
+    let mut q = query(&["provider retries"]);
+    q.limit = 3;
+    let page = store.recall(&q).unwrap();
+    assert_eq!(page.lessons.len(), 3);
+    assert_eq!(page.matched_count, 1000);
+    assert!(page.candidate_limit_reached && page.truncated);
+}
 fn seed(store: &mut SqliteStore) -> Value {
     let cohort: Value =
         serde_json::from_str(include_str!("../fixtures/retrieval-cases.json")).unwrap();

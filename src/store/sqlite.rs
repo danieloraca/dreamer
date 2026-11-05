@@ -422,8 +422,8 @@ impl SqliteStore {
         query.validate().map_err(StoreError::Invalid)?;
         let mut predicates = Vec::new();
         let mut values = vec![query.repository.clone()];
-        for term in &query.queries {
-            values.push(term.trim().into());
+        for term in retrieval::candidate_terms(query) {
+            values.push(term);
             let parameter = format!("?{}", values.len());
             predicates.push(format!("(instr(lower(l.summary || ' ' || l.applies_when),lower({parameter}))>0 OR EXISTS(SELECT 1 FROM lesson_scope s WHERE s.repository=l.repository AND s.lesson_id=l.id AND s.kind!='exclude' AND instr(lower(s.value),lower({parameter}))>0))"));
         }
@@ -436,6 +436,9 @@ impl SqliteStore {
             values.push(path.clone());
             let parameter = format!("?{}", values.len());
             predicates.push(format!("EXISTS(SELECT 1 FROM lesson_scope s WHERE s.repository=l.repository AND s.lesson_id=l.id AND s.kind='path' AND (s.value={parameter} OR (substr(s.value,-1)='/' AND substr({parameter},1,length(s.value))=s.value)))"));
+        }
+        if predicates.is_empty() {
+            return retrieval::rank(query, Vec::new(), false).map_err(StoreError::Invalid);
         }
         let tx = self.connection.unchecked_transaction()?;
         let mut statement=tx.prepare(&format!("SELECT l.id FROM lessons l WHERE l.repository=?1 AND l.status!='deprecated' AND ({}) ORDER BY l.stored_at DESC,l.id ASC LIMIT 1001",predicates.join(" OR ")))?;

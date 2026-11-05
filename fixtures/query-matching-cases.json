@@ -1,0 +1,222 @@
+{
+  "lessons": [
+    {
+      "id": "a-close",
+      "summary": "Retry conversation closure for transient provider failures.",
+      "applies_when": "Queued conversation-close jobs.",
+      "scope": {
+        "components": [
+          "chat"
+        ],
+        "paths": [
+          "src/Chat/Close.php"
+        ]
+      }
+    },
+    {
+      "id": "b-bot",
+      "summary": "Pass known channel and participant IDs through bot-response work.",
+      "applies_when": "When changing bot responses and receipts.",
+      "scope": {
+        "components": [
+          "chat"
+        ],
+        "paths": [
+          "src/Chat/BotResponse.php"
+        ]
+      }
+    },
+    {
+      "id": "c-stream",
+      "summary": "Publish the final bot reply after interrupted streaming.",
+      "applies_when": "For stream completion and socket delivery.",
+      "scope": {
+        "components": [
+          "streaming"
+        ],
+        "paths": [
+          "src/Chat/SocketService.php"
+        ]
+      }
+    },
+    {
+      "id": "d-capture",
+      "summary": "Preserve capture metadata in final messages.",
+      "applies_when": "When changing data-capture messages.",
+      "scope": {
+        "components": [
+          "chat"
+        ],
+        "paths": [
+          "src/Chat/Capture.php"
+        ]
+      }
+    },
+    {
+      "id": "e-deploy",
+      "summary": "Use a validated immutable image digest.",
+      "applies_when": "Deployment fallback policy.",
+      "scope": {
+        "components": [
+          "deploy"
+        ],
+        "paths": [
+          "deploy/"
+        ]
+      }
+    }
+  ],
+  "cases": [
+    {
+      "name": "demo phrase groups suppress component-only filler",
+      "queries": [
+        "bot response streaming",
+        "data capture"
+      ],
+      "components": [
+        "Chat"
+      ],
+      "paths": [
+        "src/Chat/BotResponse.php"
+      ],
+      "expected": [
+        "b-bot",
+        "d-capture",
+        "c-stream"
+      ]
+    },
+    {
+      "name": "dispersed words and plural reply without context",
+      "queries": [
+        "final bot replies"
+      ],
+      "expected": [
+        "c-stream"
+      ]
+    },
+    {
+      "name": "hyphenated applicability",
+      "queries": [
+        "data capture"
+      ],
+      "expected": [
+        "d-capture"
+      ]
+    },
+    {
+      "name": "CamelCase identifier",
+      "queries": [
+        "BotResponse"
+      ],
+      "expected": [
+        "b-bot"
+      ]
+    },
+    {
+      "name": "snake case identifier",
+      "queries": [
+        "bot_response"
+      ],
+      "expected": [
+        "b-bot"
+      ]
+    },
+    {
+      "name": "streaming and stream share a word form",
+      "queries": [
+        "stream"
+      ],
+      "expected": [
+        "c-stream"
+      ]
+    },
+    {
+      "name": "plural retry uses a sound candidate superset",
+      "queries": [
+        "retries"
+      ],
+      "expected": [
+        "a-close"
+      ]
+    },
+    {
+      "name": "one generic word cannot satisfy a phrase",
+      "queries": [
+        "data structure"
+      ],
+      "expected": []
+    },
+    {
+      "name": "stop words do not prevent a full group",
+      "queries": [
+        "how to publish the final bot replies"
+      ],
+      "expected": [
+        "c-stream"
+      ]
+    },
+    {
+      "name": "broad component used only as fallback",
+      "queries": [
+        "opaque-task"
+      ],
+      "components": [
+        "Chat"
+      ],
+      "expected": [
+        "a-close",
+        "b-bot",
+        "d-capture"
+      ]
+    },
+    {
+      "name": "exact path retained alongside lexical match",
+      "queries": [
+        "socket"
+      ],
+      "components": [
+        "Chat"
+      ],
+      "paths": [
+        "src/Chat/Capture.php"
+      ],
+      "expected": [
+        "d-capture",
+        "c-stream"
+      ]
+    },
+    {
+      "name": "component filler removed once task words match",
+      "queries": [
+        "socket"
+      ],
+      "components": [
+        "Chat"
+      ],
+      "expected": [
+        "c-stream"
+      ]
+    },
+    {
+      "name": "all stop words give empty result",
+      "queries": [
+        "how to"
+      ],
+      "expected": []
+    },
+    {
+      "name": "no arbitrary token prefix match",
+      "queries": [
+        "provid"
+      ],
+      "expected": []
+    },
+    {
+      "name": "acronym boundary",
+      "queries": [
+        "HTTPResponse"
+      ],
+      "expected": []
+    }
+  ]
+}

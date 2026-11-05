@@ -34,9 +34,11 @@ New candidates can optionally include:
 
 Components are short project tags. Paths are exact, case-sensitive relative files
 or directory prefixes ending with `/`; they are not glob patterns. Explicit
-excluded task phrases apply to complete words/phrases in request terms or
+excluded task phrases apply to ordered complete words in request terms or
 components, not arbitrary substrings (`synchronous` does not exclude
-`asynchronous`). Only add scope supported by the inspected PR: a file cited as
+`asynchronous`). The same word normalization used for recall handles punctuation,
+CamelCase and simple inflections in exclusions, without partial phrase matching.
+Only add scope supported by the inspected PR: a file cited as
 evidence does not establish that the lesson applies only to that file. Existing
 lessons remain valid with empty scope. Do not rewrite old candidates to add tags;
 use an evidence-backed replacement and supersession if a meaningful refinement is
@@ -53,10 +55,30 @@ limits remain 1–10. Invalid/traversal/absolute paths are rejected.
 
 Pi `recall_lessons` accepts `repository`, `queries`, optional `components`, `paths`
 and `limit`. It selects active, scoped candidates inside a consistent SQLite read
-snapshot, then uses the shared deterministic ranker. Summary matches outweigh
-applicability-only matches. Explicit component/path matches increase relevance;
-more specific paths beat broad directory hints. Context is a ranking hint, not
-proof of applicability. Ties use lesson IDs for repeatability, not age as confidence.
+snapshot, then uses the shared deterministic ranker. Each query is a word group:
+
+- Punctuation, snake_case and CamelCase delimit words (`BotResponse` becomes
+  `bot`, `response`). Common query stop words are removed.
+- A small English suffix heuristic handles `replies`/`reply`, ordinary `-s`
+  plurals and long enough `-ing` forms such as `streaming`/`stream`. It is not a
+  general stemmer, spelling correction, synonym search or semantic model.
+- Words can occur across summary, positive applicability and scope fields. One-
+  and two-word groups require all their words. Longer groups require at least
+  two thirds, rounded up: `bot response streaming` can match `bot response`.
+  A lone generic word cannot satisfy that phrase. Full groups get a bonus.
+- Summary word matches outweigh applicability-only matches. Duplicate/reordered
+  groups and overlapping words do not multiply word scores. Word boundaries
+  prevent matches such as `provid` inside `provider`.
+
+Explicit component/path matches increase relevance; more specific paths beat broad
+directory hints. Once any task group matches, lessons matching only a component
+are removed instead of filling a small preview. Matching file/directory scope is
+retained even without task-word overlap. If there are no task matches, component
+context remains a fallback. `matched_queries` lists qualifying groups, not exact
+phrase occurrences; `matched_tokens` explains their normalized words. Mac previews
+include up to six matched tokens and the group count as `matching_queries`; zero
+means context only. Context is a ranking hint, not proof of applicability. Ties use
+lesson IDs for repeatability, not age as confidence.
 
 A conservative clause filter ignores applicability clauses starting with common
 exclusions such as `not for`, `does not apply to`, `excluding` and `except`, and a
@@ -65,8 +87,11 @@ not an exclusion. This is a documented heuristic, not general language
 understanding. Explicit `scope.excluded_terms` provides a more precise opt-out.
 Always inspect full text and evidence before applying advice.
 
-Candidate selection is parameterized literal matching over text/scope plus
-explicit context matches. The most recent 1,000 matching active candidates are
+Candidate selection uses parameterized literal needles derived from the shared
+query tokenizer, plus explicit context matches. This is deliberately broader than
+the ranker: for example, `repl` selects both `reply` and `replies`, then word/group
+checks discard false positives. It never treats user text as SQL. The most recent
+1,000 matching active candidates are
 ranked; `candidate_limit_reached` and `truncated` report incomplete/broad retrieval.
 `matched_count` counts matches within that bounded pool, not the whole library.
 Refine terms/context instead of interpreting an empty or truncated reply as proof
@@ -95,6 +120,13 @@ migrations (including schema 3 if still needed). Old binaries cannot read schema
 Mac tools with `make install-mac` and start a new Codex task. There are no new
 background jobs, model calls or dependencies for ranking.
 
+The word-group matching update requires both Pi and Mac binaries to be updated:
+`make deploy` on the Pi and `make install-mac` on the Mac. It needs no schema or
+credential changes. A new Mac can rerank candidates from an older Pi, but cannot
+recover word matches that its old whole-phrase candidate selection omitted. The
+legacy literal-search fallback has the same discovery limitation and remains
+bounded to the existing per-query requests; it does not fan out into extra calls.
+
 ## Fixed retrieval evaluation
 
 `fixtures/retrieval-cases.json` contains six synthetic lessons and eight declared
@@ -104,3 +136,10 @@ boundaries, and component/file context without wording overlap. Expected top
 result or correct empty result improved from 2/8 to 8/8 on this fixed set. This is
 retrieval regression evidence, not a real-review or general bug-detection claim.
 The broader real-task trial remains milestone 4 in the master plan.
+
+`fixtures/query-matching-cases.json` adds synthetic phrase/identifier, inflection,
+word-boundary and component-fallback regression cases. Each is tested through
+SQLite selection and against ranking the complete fixture library, so a ranker
+improvement cannot mask missing SQL candidates. Mac loopback MCP tests check
+identifier case, compact hints and removal of component-only filler. These tests
+establish retrieval behavior, not improved real-review accuracy or token savings.

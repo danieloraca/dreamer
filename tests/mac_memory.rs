@@ -1040,6 +1040,46 @@ async fn recall_command(settings: &Settings, args: &[&str]) -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 #[tokio::test]
+async fn compact_recall_preserves_identifier_case_and_removes_component_only_filler() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut settings = settings(dir.path());
+    let (url, stop, task, db) = backend(dir.path()).await;
+    settings.endpoint = url;
+    let mut store = SqliteStore::open_existing(&db).unwrap();
+    let mut lesson: dreamer::lesson::Lesson =
+        serde_json::from_str(include_str!("../fixtures/sample-lesson.json")).unwrap();
+    lesson.repository = REPO.into();
+    lesson.id = "bot-response".into();
+    lesson.summary = "Preserve streaming bot responses.".into();
+    lesson.applies_when = "When changing bot reply publication.".into();
+    lesson.scope.components = vec!["chat".into()];
+    store.put_candidate(&lesson).unwrap();
+    let mut unrelated = lesson.clone();
+    unrelated.id = "unrelated-chat".into();
+    unrelated.summary = "Retry queued conversation closure.".into();
+    unrelated.applies_when = "Transient provider failures only.".into();
+    store.put_candidate(&unrelated).unwrap();
+    drop(store);
+    for term in ["BotResponse", "bot response streaming"] {
+        let reply = recall_command(&settings, &["--query", term, "--component", "Chat"]).await;
+        let previews = reply["lessons"].as_array().unwrap();
+        assert_eq!(previews.len(), 1);
+        assert_eq!(previews[0]["lesson"]["id"], lesson.id);
+        assert_eq!(previews[0]["matching_queries"], 1);
+        assert!(
+            previews[0]["relevance"]["matched_tokens"]
+                .as_array()
+                .unwrap()
+                .len()
+                >= 2
+        );
+        assert!(serde_json::to_vec(&reply).unwrap().len() <= 12_000);
+    }
+    stop.cancel();
+    task.await.unwrap();
+}
+
+#[tokio::test]
 async fn scoped_agent_learning_keeps_identity_and_pinned_sources_and_supports_context_recall() {
     use dreamer::retrieval::LessonScope;
     let dir = tempfile::tempdir().unwrap();

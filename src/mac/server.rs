@@ -42,7 +42,7 @@ impl MacMcp {
                 ),
                 crate::mcp::definition::<RecallInput>(
                     "recall_knowledge",
-                    "Recall repository knowledge before planning, implementing or reviewing code. Supply 1–6 short task terms and optional components/paths for context ranking. Defaults to five compact matches (max ten; 12 KB reply cap). Fetch get_knowledge for selected IDs before applying; inspect full applicability and evidence.",
+                    "Recall repository knowledge before planning, implementing or reviewing code. Supply 1–6 short task word groups or code identifiers and optional components/paths. Word groups allow reordered words and simple inflections; component-only hits are fallback. Defaults to five compact matches (max ten; 12 KB reply cap). Fetch get_knowledge for useful IDs; inspect full applicability and evidence.",
                     true,
                 ),
                 crate::mcp::definition::<GetInput>(

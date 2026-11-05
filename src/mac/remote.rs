@@ -116,7 +116,8 @@ pub async fn recall(
     query.queries = query
         .queries
         .into_iter()
-        .map(|q| q.trim().to_ascii_lowercase())
+        // Preserve identifier case until the shared tokenizer splits CamelCase.
+        .map(|q| q.trim().to_owned())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
@@ -216,7 +217,7 @@ fn compact_recall(
         b_score.cmp(&a_score).then_with(|| a_id.cmp(b_id))
     });
     let mut reply = json!({"repository":repository,"queries":queries,"matched_count":total,"search_limited":search_limited,"truncated":total>limit || search_limited,"lessons":[],
-        "guidance":"Lexical/context matches, not confidence scores. Fetch get_knowledge for selected IDs before applying; inspect conflict history; inspect full applicability and evidence. Shortened text can omit exclusions. Zero matches does not establish absence of knowledge."});
+        "guidance":"Task-word/context matches, not confidence scores. matching_queries counts word groups, not exact phrases; zero means context only. Fetch get_knowledge for selected IDs before applying; inspect conflict history, full applicability and evidence. Shortened text can omit exclusions. Zero results does not establish absence of knowledge."});
     for (id, (stored, matches)) in ranked.into_iter().take(limit) {
         let lesson = &stored["lesson"];
         let (summary, summary_shortened) = shortened(
@@ -242,7 +243,7 @@ fn compact_recall(
             })
         });
         let scope=lesson.get("scope").map(|scope|json!({"components":scope["components"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>()),"paths":scope["paths"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>()),"has_exclusions":scope["excluded_terms"].as_array().is_some_and(|v|!v.is_empty()),"preview_only":true}));
-        let context=stored.get("relevance").map(|r|json!({"score":r["score"],"matched_components":r["matched_components"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>()),"matched_paths":r["matched_paths"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>())}));
+        let context=stored.get("relevance").map(|r|json!({"score":r["score"],"matched_tokens":r["matched_tokens"].as_array().map(|v|v.iter().take(6).collect::<Vec<_>>()),"matched_components":r["matched_components"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>()),"matched_paths":r["matched_paths"].as_array().map(|v|v.iter().take(3).collect::<Vec<_>>())}));
         let preview = json!({"lesson":{"id":id,"summary":summary,"applies_when":applies_when,"status":lesson["status"]},"lifecycle":lifecycle,"scope":scope,"relevance":context,"matching_queries":matches,"evidence_count":evidence.len(),"source_prs":prs.into_iter().take(4).collect::<Vec<_>>(),"shortened":{"summary":summary_shortened,"applies_when":applicability_shortened},"needs_details":true});
         reply["lessons"].as_array_mut().unwrap().push(preview);
         if serde_json::to_vec(&reply)?.len() > 11_700 {

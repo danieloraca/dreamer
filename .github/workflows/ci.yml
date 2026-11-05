@@ -56,13 +56,16 @@ jobs:
         id: rust
         shell: bash
         run: |
+          cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
           if ! command -v rustup >/dev/null 2>&1; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            export PATH="$cargo_bin:$PATH"
           fi
-          source "$HOME/.cargo/env"
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           rustup default stable
+          toolchain_bin="$(dirname "$(rustup which --toolchain stable cargo)")"
+          export PATH="$toolchain_bin:$PATH"
+          echo "$toolchain_bin" >> "$GITHUB_PATH"
           echo "version=$(rustc --version | cut -d ' ' -f 2)" >> "$GITHUB_OUTPUT"
 
       - name: Cache Rust dependencies and build outputs

@@ -20,7 +20,9 @@ does not deploy, publish artifacts or install a system service. Action versions
 are pinned to release commit SHAs.
 
 Runner labels are listed in the [GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
-Rust setup uses [rustup](https://rust-lang.github.io/rustup/installation/index.html).
+Rust setup uses [rustup](https://rust-lang.github.io/rustup/installation/index.html)
+and selects the installed stable toolchain directory directly. It supports
+preinstalled/Homebrew rustup without requiring `~/.cargo/env`.
 
 Local equivalents:
 

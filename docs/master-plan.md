@@ -22,7 +22,7 @@ the same five full records; this is not a billed-token measurement.
 
 ## Milestone 1: correct knowledge and respect project authority
 
-Status: implemented and locally verified; Pi rollout pending. This is the first
+Status: implemented; Pi read path verified on 5 November 2026. This is the first
 delivery under this plan.
 
 - Add schema 3 as an additive migration. Preserve original lesson content and PR
@@ -82,7 +82,7 @@ HTTP limit layer after macOS reset an unread TCP upload; live HTTP role tests re
 
 ## Milestone 2: improve retrieval
 
-Status: implemented and locally verified; Pi schema-4 rollout pending.
+Status: implemented; ranked Pi retrieval verified on 5 November 2026.
 Implementation began at `969b009`, after CI and milestone 1 were committed.
 Use the real trial's irrelevant matches to guide this work.
 
@@ -120,6 +120,15 @@ both repository scopes, credentials and unrelated configuration were preserved.
 No production lessons were changed; schema-4 Pi deployment remains pending.
 The CI workflow was actionlint-validated and committed before this milestone;
 hosted results remain unverified until a GitHub run is observed.
+
+Update on 5 November 2026: read-only recall against the configured Pi now returns
+`retrieval_mode: ranked`, confirming the updated read path is serving. No production
+knowledge was changed during verification. GitHub CI for `b3392da` passed Linux
+x64 and native ARM64 tests/release builds, while macOS failed before tests because
+the setup script assumed `~/.cargo/env` existed. The setup fix selects the stable
+Rust toolchain path directly; a hosted macOS pass remains unverified until the fix
+is pushed and its run completes. Earlier rollout-pending notes above describe the
+4 November verification, not the current read-path observation.
 
 ## Milestone 3: make operation visible and recoverable
 

@@ -62,8 +62,10 @@ is explicitly flagged as shortened; exclusions can be outside the preview.
 applicability, provenance and evidence. Fetch details only for useful matches.
 
 Recall accepts optional `components` and `paths`; the shared lexical/context
-ranker prefers useful text and explicit scope matches, suppressing common
-exclusion-only matches. Previews include bounded scope/context hints and explicit
+ranker requires a complete task-word group and overlap with comparable supplied
+scope, suppressing partial, context-only and common exclusion-only matches.
+On `no_applicable_match`, continue with docs/code/tests without automatically
+fetching details or broadening the request. Previews include bounded scope/context hints and explicit
 conflict counts. Scores are not semantic confidence. The Mac prefers Pi
 `recall_lessons` and labels an older-Pi local fallback when needed.
 See [retrieval behavior, limits and evaluation](retrieval.md). Literal

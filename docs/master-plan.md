@@ -551,3 +551,32 @@ stages. Installed release/skill match the tested versions; the three repository
 scopes, conversation enablement, writer credential file, unrelated Codex settings
 and personal guidance were preserved. Codex CLI discovery works from the managed
 MCP environment. Start a fresh task to load these definitions.
+
+
+### Strict relevance gate — 6 November 2026
+
+Implemented a shared `strict_v1` recall policy for Pi and Mac: a complete task
+word group must match, and supplied comparable scope must overlap. Removed
+partial-word-group and context-only fallback. Explicit paths take priority over
+broad component tags; callers should include known affected consumers of shared
+code. Untagged legacy lessons remain eligible. SQL applies complete-group and
+scope constraints before the candidate cap/evidence hydration, so partial and disjoint-scope
+matches cannot crowd a relevant candidate out of the bounded pool.
+
+The Mac returns a short `no_applicable_match` response and continuation guidance
+without query echoes, details or automatic broader retries. Updated tool/skill
+instructions tell agents to continue with project docs, code and tests on a miss.
+Older Pi results are gated locally and their broad counts are not reported as
+strict matches. Both binaries need updating for consistent candidate selection;
+no migration, reset, credentials or new background work is required.
+
+Verification: 115 Rust tests with Mac features and 19 Python installer tests pass,
+including thirteen new synthetic relevance cases, complete-library versus SQL
+parity, 1,001 partial-match/scope-mismatch distractors, old ranked/literal Pi
+compatibility, bounded empty replies and no automatic detail fetches. Formatting,
+strict Clippy and default/server build checks pass. Local replay of the three
+previously selected full lessons from the holdout rejects all three for their
+original tasks; each remains retrievable under a matching positive control.
+Replay used one saved lesson per task and four changed paths, not the entire Pi
+library. This demonstrates filtering, not code-quality, wall-time or token savings.
+Deployment, Mac installation and a new controlled comparison remain follow-ups.

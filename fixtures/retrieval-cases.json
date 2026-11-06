@@ -11,8 +11,8 @@
     {"name":"export exclusion-only match","queries":["export"],"expected":["b-exports"],"absent":["a-locks"]},
     {"name":"formatting exclusion-only match","queries":["formatting"],"expected":["c-layout"],"absent":["a-locks"]},
     {"name":"account and pagination","queries":["account","pagination"],"expected":["d-tenant"]},
-    {"name":"file context without vocabulary overlap","queries":["opaque-task"],"paths":["src/Jobs/Delivery.rs"],"expected":["e-queues"]},
-    {"name":"component context without vocabulary overlap","queries":["opaque-task"],"components":["DATABASE"],"expected":["f-tls"]},
+    {"name":"file context without vocabulary overlap","queries":["opaque-task"],"paths":["src/Jobs/Delivery.rs"],"expected":[]},
+    {"name":"component context without vocabulary overlap","queries":["opaque-task"],"components":["DATABASE"],"expected":[]},
     {"name":"explicit excluded task phrase","queries":["public endpoints","account"],"expected":[],"absent":["d-tenant"]},
     {"name":"explicit excluded task word","queries":["synchronous","commit"],"expected":[],"absent":["e-queues"]},
     {"name":"excluded word is not an arbitrary substring","queries":["asynchronous","commit"],"expected":["e-queues"]}

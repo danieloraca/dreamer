@@ -161,7 +161,7 @@ impl DreamerMcp {
             ),
         ];
         tools.push(definition::<RecallQuery>(RECALL_LESSONS,
-            "Rank scoped active lessons using 1–6 task terms and optional component/file context. Excludes explicit task phrases and common exclusion-only applicability matches. Scores are lexical/context hints, not confidence; inspect full applicability/evidence. Bounded candidate pool reports truncation.",true));
+            "Recall scoped active lessons using 1–6 precise task groups and optional affected component/file context. All words in at least one group must match and comparable scope must overlap. No context-only fallback. On no_applicable_match continue with docs/code/tests without automatic detail fetches or broader retries. Excludes explicit task phrases and common exclusion-only applicability matches. Scores are lexical/context hints, not confidence; inspect full applicability/evidence. Bounded candidate pool reports truncation.",true));
         tools.push(definition::<HistoryQuery>(GET_LESSON_HISTORY,
             "Read a repository-scoped lesson's evidence-backed lifecycle history, including incoming replacements and past conflicts. Bounded pagination; optional change_id retrieves an exact retry receipt.",true));
         tools.push(definition::<RunQuery>(GET_RUNS,"Read bounded repository-scoped operational reports. Counts/times describe reports received, not a complete audit; incomplete reports do not establish a still-running job.",true));

@@ -1146,11 +1146,7 @@ async fn scoped_agent_learning_keeps_identity_and_pinned_sources_and_supports_co
             .scope,
         candidate.scope
     );
-    let recall = recall_command(
-        &settings,
-        &["--query", "opaque-task", "--path", "src/list.php"],
-    )
-    .await;
+    let recall = recall_command(&settings, &["--query", "account", "--path", "src/list.php"]).await;
     assert_eq!(recall["retrieval_mode"], "ranked");
     assert_eq!(recall["lessons"][0]["lesson"]["id"], candidate.id);
     assert!(recall["lessons"][0]["relevance"]["score"].as_u64().unwrap() > 0);
@@ -1168,6 +1164,8 @@ async fn scoped_agent_learning_keeps_identity_and_pinned_sources_and_supports_co
 #[derive(Clone)]
 struct LegacyPi {
     database: std::path::PathBuf,
+    ranked: bool,
+    calls: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
 impl rmcp::ServerHandler for LegacyPi {
     fn get_info(&self) -> rmcp::model::ServerConfig {
@@ -1183,16 +1181,20 @@ impl rmcp::ServerHandler for LegacyPi {
         _: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
         Ok(rmcp::model::ListToolsResult::with_all_items(
-            ["search_lessons", "get_lesson"]
-                .into_iter()
-                .map(|name| {
-                    rmcp::model::Tool::new(
-                        name,
-                        "Synthetic old Pi contract",
-                        json!({"type":"object"}).as_object().unwrap().clone(),
-                    )
-                })
-                .collect(),
+            if self.ranked {
+                vec!["recall_lessons", "get_lesson"]
+            } else {
+                vec!["search_lessons", "get_lesson"]
+            }
+            .into_iter()
+            .map(|name| {
+                rmcp::model::Tool::new(
+                    name,
+                    "Synthetic old Pi contract",
+                    json!({"type":"object"}).as_object().unwrap().clone(),
+                )
+            })
+            .collect(),
         ))
     }
     async fn call_tool(
@@ -1200,10 +1202,23 @@ impl rmcp::ServerHandler for LegacyPi {
         request: rmcp::model::CallToolRequestParams,
         _: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
+        self.calls.lock().unwrap().push(request.name.to_string());
         let args = Value::Object(request.arguments.unwrap_or_default());
         assert_eq!(args["repository"], REPO);
         let store = SqliteStore::open_read_only(&self.database).unwrap();
         let value = match request.name.as_ref() {
+            "recall_lessons" if self.ranked => {
+                // Simulate a previous Pi returning broad topical matches and
+                // their count without the strict relevance-policy marker.
+                let lessons = store
+                    .search(&SearchQuery {
+                        repository: REPO.into(),
+                        text: "export".into(),
+                        limit: 100,
+                    })
+                    .unwrap();
+                json!({"repository":REPO,"matched_count":lessons.len(),"lessons":lessons,"truncated":false})
+            }
             "search_lessons" => {
                 json!({"repository":REPO,"lessons":store.search(&SearchQuery {repository:REPO.into(),text:args["query"].as_str().unwrap().into(),limit:args["limit"].as_u64().unwrap() as usize}).unwrap()})
             }
@@ -1245,6 +1260,8 @@ async fn older_pi_fallback_uses_the_same_exclusion_guard_and_rejects_scoped_writ
         move || {
             Ok(LegacyPi {
                 database: database.clone(),
+                ranked: false,
+                calls: Default::default(),
             })
         },
         std::sync::Arc::new(LocalSessionManager::default()),
@@ -1471,4 +1488,67 @@ async fn activity_is_best_effort_redacted_and_queued_when_pi_is_unavailable() {
             assert!(!text.contains(WRITE));
         }
     }
+}
+
+#[tokio::test]
+async fn older_ranked_pi_is_filtered_locally_and_misses_never_fetch_details() {
+    use rmcp::transport::streamable_http_server::{
+        StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut settings = settings(dir.path());
+    let db = dir.path().join("old-ranked.sqlite3");
+    let mut store = SqliteStore::open(&db).unwrap();
+    let mut lesson: dreamer::lesson::Lesson =
+        serde_json::from_str(include_str!("../fixtures/sample-lesson.json")).unwrap();
+    lesson.repository = REPO.into();
+    lesson.id = "export-config".into();
+    lesson.summary = "Preserve export configuration during cloning.".into();
+    lesson.applies_when = "When cloning exports.".into();
+    store.put_candidate(&lesson).unwrap();
+    lesson.id = "export-formatting".into();
+    lesson.summary = "Preserve export column formatting.".into();
+    store.put_candidate(&lesson).unwrap();
+    drop(store);
+    let stop = CancellationToken::new();
+    let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = calls.clone();
+    let service = StreamableHttpService::new(
+        move || {
+            Ok(LegacyPi {
+                database: db.clone(),
+                ranked: true,
+                calls: recorded.clone(),
+            })
+        },
+        std::sync::Arc::new(LocalSessionManager::default()),
+        StreamableHttpServerConfig::default()
+            .with_json_response(true)
+            .with_cancellation_token(stop.child_token()),
+    );
+    let router = axum::Router::new().nest_service("/mcp", service);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    settings.endpoint = format!("http://{}/mcp", listener.local_addr().unwrap());
+    let shutdown = stop.clone();
+    let task = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown.cancelled_owned())
+            .await
+            .unwrap();
+    });
+    let miss = recall_command(&settings, &["--query", "export configuration permissions"]).await;
+    assert_eq!(miss["outcome"], "no_applicable_match");
+    assert_eq!(miss["matched_count"], 0); // Not the old Pi's two broad matches.
+    assert_eq!(miss["lessons"], json!([]));
+    assert_eq!(miss["truncated"], false);
+    assert_eq!(miss["retrieval_mode"], "ranked");
+    assert!(serde_json::to_vec(&miss).unwrap().len() < 650);
+    assert_eq!(*calls.lock().unwrap(), ["recall_lessons"]);
+    let hit = recall_command(&settings, &["--query", "export configuration"]).await;
+    assert_eq!(hit["outcome"], "matches");
+    assert_eq!(hit["matched_count"], 1);
+    assert_eq!(hit["lessons"][0]["lesson"]["id"], "export-config");
+    assert_eq!(*calls.lock().unwrap(), ["recall_lessons", "recall_lessons"]);
+    stop.cancel();
+    task.await.unwrap();
 }

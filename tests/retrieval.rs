@@ -18,7 +18,7 @@ fn query(terms: &[&str]) -> RecallQuery {
     }
 }
 #[test]
-fn phrase_queries_find_distributed_words_without_component_only_filler() {
+fn phrase_queries_require_complete_task_words_and_compatible_context() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = SqliteStore::open(&dir.path().join("db")).unwrap();
     let cohort: Value =
@@ -110,7 +110,7 @@ fn word_matching_keeps_exclusions_boundaries_and_duplicate_queries_safe() {
             .unwrap()
             .lessons
             .len(),
-        1
+        0
     );
 }
 
@@ -311,6 +311,8 @@ fn ranked_recall_keeps_scope_literal_queries_path_boundaries_and_negated_safety_
     broad.scope.paths = vec!["src/".into()];
     store.put_candidate(&broad).unwrap();
     q.paths = vec!["src/Jobs/Delivery.rs".into()];
+    assert!(store.recall(&q).unwrap().lessons.is_empty());
+    q.queries = vec!["commit".into()];
     assert_eq!(
         store.recall(&q).unwrap().lessons[0].stored.lesson.id,
         "e-queues"
@@ -338,4 +340,105 @@ fn ranked_recall_keeps_scope_literal_queries_path_boundaries_and_negated_safety_
             .iter()
             .all(|hit| hit.stored.lesson.repository == fixture().repository)
     );
+}
+
+#[test]
+fn strict_relevance_requires_complete_tasks_and_compatible_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = SqliteStore::open(&dir.path().join("db")).unwrap();
+    let cohort: Value =
+        serde_json::from_str(include_str!("../fixtures/strict-relevance-cases.json")).unwrap();
+    let mut frozen = Vec::new();
+    for row in cohort["lessons"].as_array().unwrap() {
+        let mut value = serde_json::to_value(fixture()).unwrap();
+        for (key, item) in row.as_object().unwrap() {
+            value[key] = item.clone();
+        }
+        let lesson: Lesson = serde_json::from_value(value).unwrap();
+        store.put_candidate(&lesson).unwrap();
+        frozen.push(store.get(&lesson.repository, &lesson.id).unwrap().unwrap());
+    }
+    for case in cohort["cases"].as_array().unwrap() {
+        let mut value = case.clone();
+        value.as_object_mut().unwrap().remove("name");
+        value.as_object_mut().unwrap().remove("expected");
+        value["repository"] = json!(fixture().repository);
+        let q: RecallQuery = serde_json::from_value(value).unwrap();
+        let page = store.recall(&q).unwrap();
+        let ids: Vec<_> = page
+            .lessons
+            .iter()
+            .map(|hit| hit.stored.lesson.id.clone())
+            .collect();
+        assert_eq!(json!(ids), case["expected"], "{}", case["name"]);
+        assert_eq!(page.matched_count, ids.len());
+        assert_eq!(page.relevance_policy, "strict_v1");
+        assert_eq!(
+            page.outcome,
+            if ids.is_empty() {
+                "no_applicable_match"
+            } else {
+                "matches"
+            }
+        );
+        let full = dreamer::retrieval::rank(&q, frozen.clone(), false).unwrap();
+        assert_eq!(
+            serde_json::to_value(page).unwrap(),
+            serde_json::to_value(full).unwrap(),
+            "{}",
+            case["name"]
+        );
+    }
+}
+
+#[test]
+fn partial_matches_do_not_exhaust_the_sql_candidate_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = SqliteStore::open(&dir.path().join("db")).unwrap();
+    let mut lesson = fixture();
+    lesson.summary = "Acquire event root locks before editing.".into();
+    lesson.applies_when = "When editing event trees.".into();
+    for n in 0..1001 {
+        lesson.id = format!("a-partial-{n:04}");
+        store.put_candidate(&lesson).unwrap();
+    }
+    let miss = store.recall(&query(&["event lock permission"])).unwrap();
+    assert_eq!(miss.outcome, "no_applicable_match");
+    assert!(!miss.candidate_limit_reached);
+    lesson.id = "z-permissions".into();
+    lesson.summary = "Keep event lock permission constants aligned with seeders.".into();
+    store.put_candidate(&lesson).unwrap();
+    let page = store.recall(&query(&["event lock permission"])).unwrap();
+    assert_eq!(page.lessons.len(), 1);
+    assert_eq!(page.lessons[0].stored.lesson.id, "z-permissions");
+    assert!(!page.candidate_limit_reached);
+    assert!(!page.truncated);
+}
+
+#[test]
+fn mismatched_scopes_do_not_exhaust_the_sql_candidate_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = SqliteStore::open(&dir.path().join("db")).unwrap();
+    let mut lesson = fixture();
+    lesson.summary = "Keep Button promise pending protection during recovery.".into();
+    lesson.scope.components = vec!["chat".into()];
+    lesson.scope.paths = vec!["src/Reconnect/".into()];
+    for n in 0..1001 {
+        lesson.id = format!("a-feature-{n:04}");
+        store.put_candidate(&lesson).unwrap();
+    }
+    let mut q = query(&["Button promise pending"]);
+    q.components = vec!["chat".into()];
+    q.paths = vec!["src/Ui/Buttons/index.ts".into()];
+    let miss = store.recall(&q).unwrap();
+    assert_eq!(miss.outcome, "no_applicable_match");
+    assert!(!miss.candidate_limit_reached);
+    lesson.id = "z-shared-button".into();
+    lesson.scope.components = vec!["ui".into()];
+    lesson.scope.paths = vec!["src/Ui/Buttons/".into()];
+    store.put_candidate(&lesson).unwrap();
+    let page = store.recall(&q).unwrap();
+    assert_eq!(page.lessons.len(), 1);
+    assert_eq!(page.lessons[0].stored.lesson.id, "z-shared-button");
+    assert!(!page.candidate_limit_reached);
 }

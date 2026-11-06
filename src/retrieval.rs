@@ -131,6 +131,8 @@ pub struct RecallPage {
     pub matched_count: usize,
     pub truncated: bool,
     pub candidate_limit_reached: bool,
+    pub relevance_policy: &'static str,
+    pub outcome: &'static str,
 }
 fn contains_phrase(text: &str, phrase: &str) -> bool {
     let text = word_sequence(text);
@@ -271,21 +273,24 @@ fn query_groups(query: &RecallQuery) -> BTreeMap<Vec<String>, String> {
     groups
 }
 
-/// Broad literal SQL needles: a superset of word-group matches, filtered by rank.
-/// `replies` normalizes to `reply`, so select with `repl` to find both spellings.
-pub(crate) fn candidate_terms(query: &RecallQuery) -> Vec<String> {
+/// SQL needles are a superset of complete word-group matches. Each inner
+/// group requires all needles; different groups are alternatives.
+pub(crate) fn candidate_groups(query: &RecallQuery) -> Vec<Vec<String>> {
     query_groups(query)
         .into_keys()
-        .flatten()
-        .map(|word| {
-            if word.len() > 3 && word.ends_with('y') {
-                word[..word.len() - 1].to_owned()
-            } else {
-                word
-            }
+        .map(|group| {
+            group
+                .into_iter()
+                .map(|word| {
+                    // replies -> reply; both must remain selectable by the SQL prefilter.
+                    if word.len() > 3 && word.ends_with('y') {
+                        word[..word.len() - 1].to_owned()
+                    } else {
+                        word
+                    }
+                })
+                .collect()
         })
-        .collect::<BTreeSet<_>>()
-        .into_iter()
         .collect()
 }
 
@@ -325,14 +330,9 @@ pub fn rank(
                 .iter()
                 .filter(|token| fields.iter().any(|(set, _)| set.contains(*token)))
                 .collect();
-            // One generic word from a phrase is not sufficient. Longer phrases
-            // tolerate one-third missing words, e.g. "bot response streaming".
-            let required = if tokens.len() <= 2 {
-                tokens.len()
-            } else {
-                (tokens.len() * 2).div_ceil(3)
-            };
-            if matches.len() >= required {
+            // Require the whole task group. Partial topical overlap must not
+            // introduce advice about a different operation in the same feature.
+            if matches.len() == tokens.len() {
                 matched_queries.push(original.clone());
                 score += usize::from(tokens.len() > 1 && matches.len() == tokens.len()) * 8;
                 for token in matches {
@@ -371,6 +371,18 @@ pub fn rank(
             })
             .cloned()
             .collect();
+        // Scope is an applicability constraint when comparable task context is
+        // supplied. A shared broad component cannot override a path mismatch.
+        // Include known affected consumers in query.paths for shared-code work.
+        let path_mismatch =
+            !query.paths.is_empty() && !lesson.scope.paths.is_empty() && matched_paths.is_empty();
+        let component_mismatch = !query.components.is_empty()
+            && !lesson.scope.components.is_empty()
+            && matched_components.is_empty()
+            && matched_paths.is_empty();
+        if matched_queries.is_empty() || path_mismatch || component_mismatch {
+            continue;
+        }
         let specificity = lesson
             .scope
             .paths
@@ -398,16 +410,6 @@ pub fn rank(
             });
         }
     }
-    // Preserve explicit file/directory context, but don't pad a useful lexical
-    // reply with lessons matching only a broad component such as "Chat".
-    if hits
-        .iter()
-        .any(|hit| !hit.relevance.matched_queries.is_empty())
-    {
-        hits.retain(|hit| {
-            !hit.relevance.matched_queries.is_empty() || !hit.relevance.matched_paths.is_empty()
-        });
-    }
     hits.sort_by(|a, b| {
         b.relevance
             .score
@@ -428,5 +430,11 @@ pub fn rank(
         matched_count,
         truncated,
         candidate_limit_reached,
+        relevance_policy: "strict_v1",
+        outcome: if matched_count == 0 {
+            "no_applicable_match"
+        } else {
+            "matches"
+        },
     })
 }

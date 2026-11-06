@@ -1,0 +1,239 @@
+{
+  "lessons": [
+    {
+      "id": "locks",
+      "summary": "Acquire event root locks before mutations.",
+      "applies_when": "When editing or cloning event trees."
+    },
+    {
+      "id": "catalog",
+      "summary": "Keep event lock permission constants aligned with seeders.",
+      "applies_when": "When updating the permission catalog.",
+      "scope": {
+        "components": [
+          "permissions"
+        ],
+        "paths": [
+          "src/Permissions/"
+        ]
+      }
+    },
+    {
+      "id": "reconnect",
+      "summary": "Keep Button promise pending protection during recovery.",
+      "applies_when": "When changing social account reconnect controls.",
+      "scope": {
+        "components": [
+          "chat"
+        ],
+        "paths": [
+          "src/Reconnect/"
+        ]
+      }
+    },
+    {
+      "id": "button",
+      "summary": "Keep Button promise pending protection until settlement.",
+      "applies_when": "When changing shared Button controls.",
+      "scope": {
+        "components": [
+          "ui"
+        ],
+        "paths": [
+          "src/Ui/Buttons/"
+        ]
+      }
+    },
+    {
+      "id": "tabs",
+      "summary": "Map conversation filter tabs to effective segments.",
+      "applies_when": "When changing conversation filter tabs.",
+      "scope": {
+        "components": [
+          "conversations"
+        ],
+        "paths": [
+          "src/Conversation/Filters/"
+        ]
+      }
+    },
+    {
+      "id": "deleted-filter",
+      "summary": "Avoid stale conversation filter tabs after deletion.",
+      "applies_when": "When changing deleted filter initialization.",
+      "scope": {
+        "components": [
+          "conversations"
+        ],
+        "paths": [
+          "src/Conversation/Deleted/"
+        ]
+      }
+    }
+  ],
+  "cases": [
+    {
+      "name": "permission operation requires the missing word",
+      "queries": [
+        "event lock permission"
+      ],
+      "components": [],
+      "paths": [],
+      "expected": [
+        "catalog"
+      ]
+    },
+    {
+      "name": "actual mutation still recalls legacy untagged advice",
+      "queries": [
+        "event root locks"
+      ],
+      "components": [],
+      "paths": [],
+      "expected": [
+        "locks"
+      ]
+    },
+    {
+      "name": "shared button rejects feature-specific advice despite shared chat tag",
+      "queries": [
+        "Button promise pending"
+      ],
+      "components": [
+        "chat"
+      ],
+      "paths": [
+        "src/Ui/Buttons/index.ts"
+      ],
+      "expected": [
+        "button"
+      ]
+    },
+    {
+      "name": "known shared-code consumers can be passed explicitly",
+      "queries": [
+        "Button promise pending"
+      ],
+      "components": [],
+      "paths": [
+        "src/Ui/Buttons/index.ts",
+        "src/Reconnect/Control.ts"
+      ],
+      "expected": [
+        "button",
+        "reconnect"
+      ]
+    },
+    {
+      "name": "precise reconnect context still recalls its lesson",
+      "queries": [
+        "Button promise pending"
+      ],
+      "components": [
+        "chat"
+      ],
+      "paths": [
+        "src/Reconnect/Control.ts"
+      ],
+      "expected": [
+        "reconnect"
+      ]
+    },
+    {
+      "name": "same component does not override another feature path",
+      "queries": [
+        "conversation filter tabs"
+      ],
+      "components": [
+        "conversations"
+      ],
+      "paths": [
+        "src/Conversation/Filters/useMap.ts"
+      ],
+      "expected": [
+        "tabs"
+      ]
+    },
+    {
+      "name": "a path is not enough without a complete task group",
+      "queries": [
+        "unrelated opaque task"
+      ],
+      "components": [],
+      "paths": [
+        "src/Conversation/Filters/useMap.ts"
+      ],
+      "expected": []
+    },
+    {
+      "name": "a component is not enough without a complete task group",
+      "queries": [
+        "unrelated opaque task"
+      ],
+      "components": [
+        "conversations"
+      ],
+      "paths": [],
+      "expected": []
+    },
+    {
+      "name": "partial group does not become a hit via direct path",
+      "queries": [
+        "Button pending cancellation"
+      ],
+      "components": [],
+      "paths": [
+        "src/Ui/Buttons/index.ts"
+      ],
+      "expected": []
+    },
+    {
+      "name": "explicit component mismatch excludes a topical lesson",
+      "queries": [
+        "Button promise pending"
+      ],
+      "components": [
+        "billing"
+      ],
+      "paths": [],
+      "expected": []
+    },
+    {
+      "name": "path prefixes respect directory boundaries",
+      "queries": [
+        "Button promise pending"
+      ],
+      "components": [],
+      "paths": [
+        "src/ReconnectElsewhere/Control.ts"
+      ],
+      "expected": []
+    },
+    {
+      "name": "reordered inflected complete words remain useful",
+      "queries": [
+        "promises pending buttons"
+      ],
+      "components": [],
+      "paths": [
+        "src/Ui/Buttons/index.ts"
+      ],
+      "expected": [
+        "button"
+      ]
+    },
+    {
+      "name": "all stopwords cannot recall via context",
+      "queries": [
+        "how to"
+      ],
+      "components": [
+        "chat"
+      ],
+      "paths": [
+        "src/Reconnect/Control.ts"
+      ],
+      "expected": []
+    }
+  ]
+}

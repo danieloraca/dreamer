@@ -28,20 +28,27 @@ Storing a provisional PR lesson does not independently verify it or publish docs
 Discover Dreamer's available tools. Call `list_repositories` to see configured scopes;
 resolve the actual task repository from the checkout/PR and select it explicitly.
 Never combine another repository's lessons by default. Prefer one Mac
-`recall_knowledge` call with a few short task/component terms and the explicit
-repository. Add relevant `components` and repository-relative `paths` when known;
-these improve context ranking. It returns five compact previews by default (maximum ten; 12 KB cap).
+`recall_knowledge` call with precise behavior/code-identifier groups and the explicit
+repository. Every word of at least one group must match; avoid generic one-word
+alternatives that admit unrelated advice. Add actual affected `components` and
+repository-relative `paths` when known, including known shared-code consumers.
+Comparable scope must overlap; broad components cannot override a path mismatch.
+Context alone no longer admits a lesson. It returns five compact previews by default (maximum ten; 12 KB cap).
 Fetch `get_knowledge` only for the useful IDs, usually one to three; inspect full
 applicability and evidence before applying a lesson. Shortened previews can omit
-exclusions. Refine overly broad terms rather than repeatedly loading more records.
-Reuse what you have already read during the task; recall again when scope changes.
+exclusions. On `outcome: no_applicable_match`, continue with project docs, code and
+tests without fetching details or automatically broadening/repeating recall.
+Recall again only when task scope changes or the original query was mistaken.
+A truncated response means selection was incomplete; narrow that request if needed.
+Reuse what you have already read during the task.
 
 With only Pi tools, prefer `recall_lessons` with a few terms and component/file
 context, then `get_lesson` as needed. If only literal `search_lessons` is available,
 use a small limit (e.g. three). Literal matches can include exclusions; discard those
 matches. Read explicit scope exclusions and conflict history before applying a preview.
 Scores are ranking hints, not confidence. An older Pi is labeled `legacy_fallback`;
-it cannot discover context-only matches absent from literal results. Scoped writes
+it can miss useful candidates absent from literal results. The Mac still gates
+older Pi results locally; update both machines for consistent selection. Scoped writes
 need the upgraded Pi. Use relevant lessons alongside current source and tests. A miss does not
 establish that no knowledge exists. If unavailable, say so and continue.
 

@@ -82,7 +82,7 @@ impl MacMcp {
                 ),
                 crate::mcp::definition::<RecallInput>(
                     "recall_knowledge",
-                    "Recall repository knowledge before planning, implementing or reviewing code. Supply 1–6 short task word groups or code identifiers and optional components/paths. Word groups allow reordered words and simple inflections; component-only hits are fallback. Defaults to five compact matches (max ten; 12 KB reply cap). Fetch get_knowledge for useful IDs; inspect full applicability and evidence.",
+                    "Recall repository knowledge before planning, implementing or reviewing code. Supply 1–6 short task word groups or code identifiers and optional components/paths. All words of at least one group must match, with reordered words/simple inflections. Supply actual affected paths/components, including known consumers: comparable scope must overlap and context alone never qualifies. On no_applicable_match continue with docs/code/tests; do not fetch details or retry broader unless scope changed or the query was mistaken. Defaults to five compact matches (max ten; 12 KB reply cap). Fetch get_knowledge for useful IDs; inspect full applicability and evidence.",
                     true,
                 ),
                 crate::mcp::definition::<GetInput>(

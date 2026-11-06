@@ -446,26 +446,51 @@ impl SqliteStore {
         query.validate().map_err(StoreError::Invalid)?;
         let mut predicates = Vec::new();
         let mut values = vec![query.repository.clone()];
-        for term in retrieval::candidate_terms(query) {
-            values.push(term);
-            let parameter = format!("?{}", values.len());
-            predicates.push(format!("(instr(lower(l.summary || ' ' || l.applies_when),lower({parameter}))>0 OR EXISTS(SELECT 1 FROM lesson_scope s WHERE s.repository=l.repository AND s.lesson_id=l.id AND s.kind!='exclude' AND instr(lower(s.value),lower({parameter}))>0))"));
-        }
-        for component in &query.components {
-            values.push(component.trim().into());
-            let parameter = format!("?{}", values.len());
-            predicates.push(format!("EXISTS(SELECT 1 FROM lesson_scope s WHERE s.repository=l.repository AND s.lesson_id=l.id AND s.kind='component' AND lower(s.value)=lower({parameter}))"));
-        }
-        for path in &query.paths {
-            values.push(path.clone());
-            let parameter = format!("?{}", values.len());
-            predicates.push(format!("EXISTS(SELECT 1 FROM lesson_scope s WHERE s.repository=l.repository AND s.lesson_id=l.id AND s.kind='path' AND (s.value={parameter} OR (substr(s.value,-1)='/' AND substr({parameter},1,length(s.value))=s.value)))"));
+        for group in retrieval::candidate_groups(query) {
+            let mut words = Vec::new();
+            for term in group {
+                values.push(term);
+                let parameter = format!("?{}", values.len());
+                words.push(format!("(instr(lower(l.summary || ' ' || l.applies_when),lower({parameter}))>0 OR EXISTS(SELECT 1 FROM lesson_scope s WHERE s.repository=l.repository AND s.lesson_id=l.id AND s.kind!='exclude' AND instr(lower(s.value),lower({parameter}))>0))"));
+            }
+            predicates.push(format!("({})", words.join(" AND ")));
         }
         if predicates.is_empty() {
             return retrieval::rank(query, Vec::new(), false).map_err(StoreError::Invalid);
         }
+        // Apply comparable scope before the candidate cap and evidence loading.
+        // Keep these constraints aligned with retrieval::rank for old-Pi reranks.
+        let mut path_matches = Vec::new();
+        for path in &query.paths {
+            values.push(path.clone());
+            let parameter = format!("?{}", values.len());
+            path_matches.push(format!("(s.value={parameter} OR (substr(s.value,-1)='/' AND substr({parameter},1,length(s.value))=s.value))"));
+        }
+        let path_match = if path_matches.is_empty() {
+            "0".to_owned()
+        } else {
+            format!(
+                "EXISTS(SELECT 1 FROM lesson_scope s WHERE s.repository=l.repository AND s.lesson_id=l.id AND s.kind='path' AND ({}))",
+                path_matches.join(" OR ")
+            )
+        };
+        let mut constraints = Vec::new();
+        if !query.paths.is_empty() {
+            constraints.push(format!("(NOT EXISTS(SELECT 1 FROM lesson_scope s WHERE s.repository=l.repository AND s.lesson_id=l.id AND s.kind='path') OR {path_match})"));
+        }
+        let mut component_matches = Vec::new();
+        for component in &query.components {
+            values.push(component.trim().to_owned());
+            component_matches.push(format!("lower(s.value)=lower(?{})", values.len()));
+        }
+        if !component_matches.is_empty() {
+            constraints.push(format!("(NOT EXISTS(SELECT 1 FROM lesson_scope s WHERE s.repository=l.repository AND s.lesson_id=l.id AND s.kind='component') OR {path_match} OR EXISTS(SELECT 1 FROM lesson_scope s WHERE s.repository=l.repository AND s.lesson_id=l.id AND s.kind='component' AND ({})))", component_matches.join(" OR ")));
+        }
+        if constraints.is_empty() {
+            constraints.push("1".to_owned());
+        }
         let tx = self.connection.unchecked_transaction()?;
-        let mut statement=tx.prepare(&format!("SELECT l.id FROM lessons l WHERE l.repository=?1 AND l.status!='deprecated' AND ({}) ORDER BY l.id ASC LIMIT 1001",predicates.join(" OR ")))?;
+        let mut statement=tx.prepare(&format!("SELECT l.id FROM lessons l WHERE l.repository=?1 AND l.status!='deprecated' AND ({}) AND ({}) ORDER BY l.id ASC LIMIT 1001",predicates.join(" OR "), constraints.join(" AND ")))?;
         let ids = statement
             .query_map(rusqlite::params_from_iter(values), |row| {
                 row.get::<_, String>(0)

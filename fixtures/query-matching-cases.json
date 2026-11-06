@@ -68,7 +68,7 @@
   ],
   "cases": [
     {
-      "name": "demo phrase groups suppress component-only filler",
+      "name": "partial task groups and mismatched paths are rejected",
       "queries": [
         "bot response streaming",
         "data capture"
@@ -79,11 +79,7 @@
       "paths": [
         "src/Chat/BotResponse.php"
       ],
-      "expected": [
-        "b-bot",
-        "d-capture",
-        "c-stream"
-      ]
+      "expected": []
     },
     {
       "name": "dispersed words and plural reply without context",
@@ -156,21 +152,17 @@
       ]
     },
     {
-      "name": "broad component used only as fallback",
+      "name": "broad component does not supply missing task words",
       "queries": [
         "opaque-task"
       ],
       "components": [
         "Chat"
       ],
-      "expected": [
-        "a-close",
-        "b-bot",
-        "d-capture"
-      ]
+      "expected": []
     },
     {
-      "name": "exact path retained alongside lexical match",
+      "name": "path alone and socket lesson in another scope are rejected",
       "queries": [
         "socket"
       ],
@@ -180,22 +172,17 @@
       "paths": [
         "src/Chat/Capture.php"
       ],
-      "expected": [
-        "d-capture",
-        "c-stream"
-      ]
+      "expected": []
     },
     {
-      "name": "component filler removed once task words match",
+      "name": "explicit component mismatch rejects lexical match",
       "queries": [
         "socket"
       ],
       "components": [
         "Chat"
       ],
-      "expected": [
-        "c-stream"
-      ]
+      "expected": []
     },
     {
       "name": "all stop words give empty result",

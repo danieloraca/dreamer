@@ -62,23 +62,41 @@ snapshot, then uses the shared deterministic ranker. Each query is a word group:
 - A small English suffix heuristic handles `replies`/`reply`, ordinary `-s`
   plurals and long enough `-ing` forms such as `streaming`/`stream`. It is not a
   general stemmer, spelling correction, synonym search or semantic model.
-- Words can occur across summary, positive applicability and scope fields. One-
-  and two-word groups require all their words. Longer groups require at least
-  two thirds, rounded up: `bot response streaming` can match `bot response`.
-  A lone generic word cannot satisfy that phrase. Full groups get a bonus.
+- Words can occur across summary, positive applicability and scope fields.
+  **Every word in at least one query group must match.** `bot response streaming`
+  no longer matches a lesson mentioning only `bot response`. Query groups are
+  alternatives, so use a precise behavior/identifier in each; adding a generic
+  one-word alternative can admit broad advice. No synonym or semantic inference
+  is performed.
 - Summary word matches outweigh applicability-only matches. Duplicate/reordered
   groups and overlapping words do not multiply word scores. Word boundaries
   prevent matches such as `provid` inside `provider`.
 
-Explicit component/path matches increase relevance; more specific paths beat broad
-directory hints. Once any task group matches, lessons matching only a component
-are removed instead of filling a small preview. Matching file/directory scope is
-retained even without task-word overlap. If there are no task matches, component
-context remains a fallback. `matched_queries` lists qualifying groups, not exact
-phrase occurrences; `matched_tokens` explains their normalized words. Mac previews
-include up to six matched tokens and the group count as `matching_queries`; zero
-means context only. Context is a ranking hint, not proof of applicability. Ties use
-lesson IDs for repeatability, not age as confidence.
+Scope is a constraint when comparable task context is supplied:
+
+- If both request and lesson have paths, at least one must match. A common
+  component does not override disjoint paths. Include known affected consumer
+  paths for shared-code changes, not just the shared helper's changed file.
+- If both have components, at least one must match unless a path matched.
+- Context alone never admits a lesson. A complete task group is still required;
+  broad component and path-only fallback have been removed.
+- Untagged legacy lessons can still match task groups; missing scope is unknown,
+  not evidence of a match or mismatch. Evidence file paths are not inferred scope.
+
+Admitted lessons retain lexical/context scoring; more specific matching paths
+rank higher. `matched_queries` lists complete word groups, not exact phrase
+occurrences; `matched_tokens` explains normalized words. Scores do not certify
+semantic applicability, correctness, novelty or whether the current code already
+implements the advice. Ties use source chronology then lesson ID.
+
+Both Pi and Mac replies include `relevance_policy: strict_v1` and
+`outcome: matches|no_applicable_match`. A Mac miss returns an empty list and a
+short continuation hint, omitting query echoes and lesson metadata. It makes no
+`get_lesson` requests, automatic broader retries, model calls or background work.
+Continue with current project docs, source and tests; recall again only if task
+scope changes or the initial query was mistaken. Conservative gating can miss
+useful advice, especially synonyms, shared-code consumers and incomplete scopes.
+A miss does not establish absence of knowledge. Truncation flags remain visible.
 
 A conservative clause filter ignores applicability clauses starting with common
 exclusions such as `not for`, `does not apply to`, `excluding` and `except`, and a
@@ -88,23 +106,27 @@ understanding. Explicit `scope.excluded_terms` provides a more precise opt-out.
 Always inspect full text and evidence before applying advice.
 
 Candidate selection uses parameterized literal needles derived from the shared
-query tokenizer, plus explicit context matches. This is deliberately broader than
-the ranker: for example, `repl` selects both `reply` and `replies`, then word/group
-checks discard false positives. It never treats user text as SQL. The most recent
-1,000 matching active candidates are
+query tokenizer. SQL requires all needles within a group, with groups as
+alternatives; it no longer loads candidates for context alone or partial groups.
+Comparable scope is filtered before the cap and evidence loading as well.
+This remains broader than the ranker: for example, `repl` selects both `reply` and
+`replies`, then word/group checks discard false positives. It never treats user
+text as SQL. The first 1,000 matching active candidates in lesson-ID order are
 ranked; `candidate_limit_reached` and `truncated` report incomplete/broad retrieval.
 `matched_count` counts matches within that bounded pool, not the whole library.
-Refine terms/context instead of interpreting an empty or truncated reply as proof
-that no knowledge exists. Literal Pi `search_lessons` stays compatible and may
+Narrow an overly broad, truncated request rather than fetching more details.
+A normal empty reply is a stopping point for recall on the current task. Literal Pi `search_lessons` stays compatible and may
 still return an exclusion-only match; prefer ranked recall for task guidance.
 
-The Mac discovers the Pi capability. With ranked recall, context-only matches can
-be found even when task wording differs. With an older Pi, it retrieves up to 100
-literal candidates per term and applies the same ranker locally. The reply labels
-`retrieval_mode: ranked|legacy_fallback`. The fallback cannot discover a record
-that old literal search did not return, including context-only matches. Scoped
-candidate writes require the upgraded Pi and fail with an upgrade message before
-submission. Legacy empty-scope writes remain compatible.
+The Mac discovers the Pi capability. It applies the same strict gate locally,
+including when a previously deployed Pi returns broad ranked hits. Only counts
+marked with the same `strict_v1` policy are trusted; otherwise `matched_count`
+counts locally admitted candidates. With a Pi lacking ranked recall, it retrieves
+up to 100 literal candidates per query and gates them locally. Replies retain
+`retrieval_mode: ranked|legacy_fallback`. Older Pis may omit useful candidates
+before local filtering, so upgrade both machines for consistent selection and
+accurate bounded-pool counts. `search_limited`/`truncated` preserve incomplete
+retrieval warnings. Scope-aware submission still requires an upgraded Pi.
 
 ## Local usage and rollout
 
@@ -138,8 +160,26 @@ retrieval regression evidence, not a real-review or general bug-detection claim.
 The broader real-task trial remains milestone 4 in the master plan.
 
 `fixtures/query-matching-cases.json` adds synthetic phrase/identifier, inflection,
-word-boundary and component-fallback regression cases. Each is tested through
+word-boundary and context-constraint regression cases. Each is tested through
 SQLite selection and against ranking the complete fixture library, so a ranker
 improvement cannot mask missing SQL candidates. Mac loopback MCP tests check
 identifier case, compact hints and removal of component-only filler. These tests
 establish retrieval behavior, not improved real-review accuracy or token savings.
+
+## Strict-gate verification
+
+`fixtures/strict-relevance-cases.json` adds thirteen synthetic cases modeled on
+review-comparison mismatches, plus positive controls: permission-catalog versus
+mutation advice, shared UI versus feature-specific advice, consumer-path context,
+complete/reordered/inflected groups, scope mismatches, and no context-only padding.
+Each case compares SQLite retrieval with the shared ranker over the entire fixture.
+Separate tests put 1,001 partial matches or mismatched scopes before a useful
+complete match to ensure neither can exhaust SQL's candidate budget. Existing fixture expectations now
+reflect deliberate removal of partial/context-only matches; the earlier 2/8 versus
+8/8 result describes the previous policy, not new evidence of work-time savings.
+
+Mac tests cover short misses, retained truncation warnings, no automatic detail
+fetches/retries, filtering an older ranked Pi and correcting its broad counts,
+literal-search fallback, positive previews and the 12 KB cap. These deterministic
+checks establish response behavior; repeat controlled task comparisons separately
+before claiming token or time savings.

@@ -130,7 +130,11 @@ pub async fn recall(
         if native {
             let reply=call(&client,"recall_lessons",json!({"repository":repository,"queries":query.queries,"components":query.components,"paths":query.paths,"limit":20})).await?;
             limited=reply["truncated"]==true || reply["candidate_limit_reached"]==true;
-            server_count=reply["matched_count"].as_u64();
+            // An older Pi may count broad hits rejected by the local gate.
+            // Only trust counts produced by the same relevance contract.
+            if reply["relevance_policy"]=="strict_v1" {
+                server_count=reply["matched_count"].as_u64();
+            }
             for stored in reply["lessons"].as_array().ok_or("missing Pi ranked lesson list")? {
                 let stored:crate::lesson::StoredLesson=serde_json::from_value(stored.clone())?;
                 if stored.lesson.repository!=repository {return Err("Pi returned a different repository".into());}
@@ -205,6 +209,14 @@ fn compact_recall(
     search_limited: bool,
 ) -> Result<Value> {
     let total = lessons.len();
+    if total == 0 {
+        return Ok(
+            json!({"repository":repository,"matched_count":0,"lessons":[],
+            "outcome":"no_applicable_match","relevance_policy":"strict_v1",
+            "search_limited":search_limited,"truncated":search_limited,
+            "guidance":"Continue with project docs, code and tests. Do not fetch details or broaden recall unless task scope changes or the query was mistaken. A miss does not prove knowledge is absent."}),
+        );
+    }
     let mut ranked: Vec<_> = lessons.into_iter().collect();
     // Deterministic lexical overlap, not a semantic confidence score.
     ranked.sort_by(|(a_id, (a, a_matches)), (b_id, (b, b_matches))| {
@@ -226,8 +238,8 @@ fn compact_recall(
             })
             .then_with(|| a_id.cmp(b_id))
     });
-    let mut reply = json!({"repository":repository,"queries":queries,"matched_count":total,"search_limited":search_limited,"truncated":total>limit || search_limited,"lessons":[],
-        "guidance":"Task-word/context matches, not confidence scores. matching_queries counts word groups, not exact phrases; zero means context only. Fetch get_knowledge for selected IDs before applying; inspect conflict history, full applicability and evidence. Shortened text can omit exclusions. Source chronology is separate from storage time; inspect related advice and current docs/code before choosing between competing lessons. Zero results does not establish absence of knowledge."});
+    let mut reply = json!({"repository":repository,"queries":queries,"matched_count":total,"search_limited":search_limited,"truncated":total>limit || search_limited,"lessons":[],"outcome":"matches","relevance_policy":"strict_v1",
+        "guidance":"Complete task-word matches within supplied scope, not confidence scores. matching_queries counts word groups, not exact phrases. Fetch get_knowledge for selected IDs before applying; inspect conflict history, full applicability and evidence. Shortened text can omit exclusions. Source chronology is separate from storage time; inspect related advice and current docs/code before choosing between competing lessons. Zero results does not establish absence of knowledge."});
     for (id, (stored, matches)) in ranked.into_iter().take(limit) {
         let lesson = &stored["lesson"];
         let (summary, summary_shortened) = shortened(
@@ -284,6 +296,26 @@ fn compact_recall(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn no_match_returns_a_small_terminal_reply_without_echoing_queries() {
+        for limited in [false, true] {
+            let reply = compact_recall(
+                "example/project",
+                &["long private task".repeat(50)],
+                5,
+                BTreeMap::new(),
+                limited,
+            )
+            .unwrap();
+            assert_eq!(reply["outcome"], "no_applicable_match");
+            assert_eq!(reply["lessons"], json!([]));
+            assert_eq!(reply["matched_count"], 0);
+            assert_eq!(reply["search_limited"], limited);
+            assert_eq!(reply["truncated"], limited);
+            assert!(reply.get("queries").is_none());
+            assert!(serde_json::to_vec(&reply).unwrap().len() < 650);
+        }
+    }
     #[test]
     fn recall_bounds_context_without_silently_dropping_exclusions() {
         let mut records = BTreeMap::new();
